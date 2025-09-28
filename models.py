@@ -57,15 +57,18 @@ def get_schedules_by_room_id(room_id: int):
 
 def get_schedules_by_section_and_stage(section: str, stage: str, group: str, study_type: str):
     supabase = get_supabase()
-    # Modified query to handle null values in section and group
-    # If schedule has null section/group, it should match any student
+    # Filter schedules based on lecture type and student attributes
+    # For theoretical lectures: match section_number with student section
+    # For practical lectures: match group_letter with student group
     response = (
         supabase.table('schedules').select('*, rooms!schedules_room_id_fkey(name, code), doctors!fk_doctor(name)')
         .eq('academic_stage', stage)
         .eq('study_type', study_type)
         .eq('is_active', True)
-        .or_(f'section.is.null,section.eq.{section}')
-        .or_(f'group.is.null,group.eq.{group}')
+        .or_(
+            f'and(lecture_type.eq.نظري,section_number.eq.{section})',
+            f'and(lecture_type.eq.عملي,group_letter.eq.{group})'
+        )
         .execute()
     )
     return response.data

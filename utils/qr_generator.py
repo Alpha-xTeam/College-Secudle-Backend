@@ -59,19 +59,30 @@ def draw_penrose_triangle(draw, center_x, center_y, size, fill_color="#FF0000", 
         (center_x + outer_size//2, center_y + outer_size//3)
     ], fill="#AA0000", width=line_width)
 
-def generate_room_qr(room_code, room_id):
+def generate_room_qr(room_code, room_id, base_url=None):
     """
     توليد QR Code للقاعة مع تصميم احترافي ومثلث بنروز داخل الباركود
     Args:
         room_code: رمز القاعة
         room_id: معرف القاعة في قاعدة البيانات
+        base_url: رابط الأساسي للواجهة الأمامية (اختياري)
     Returns:
         str: مسار ملف QR المحفوظ
     """
     try:
-        # إنشاء رابط القاعة باستخدام IP ديناميكي للواجهة الأمامية (يفحص المنافذ الشائعة)
-        base_url = get_frontend_url(port=3033)
+        print(f"QR Generator: Called with base_url={base_url}, room_code={room_code}")
+        # إنشاء رابط القاعة باستخدام base_url أو الافتراضي
+        if base_url is None:
+            # Force the correct URL for now
+            base_url = 'https://www.it-college.zone.id'
+            print(f"QR Generator: Using hardcoded FRONTEND_URL: {base_url} for room {room_code}")
+        else:
+            # Override any passed base_url to force correct domain
+            print(f"QR Generator: Received base_url: {base_url}, overriding to correct domain")
+            base_url = 'https://www.it-college.zone.id'
+            print(f"QR Generator: Using overridden FRONTEND_URL: {base_url} for room {room_code}")
         room_url = f"{base_url}/room/{room_code}"
+        print(f"QR Generator: Final URL being encoded: {room_url}")  # Debug the actual URL
         # إنشاء QR Code بدقة عالية
         qr = qrcode.QRCode(
             version=5,
@@ -140,6 +151,7 @@ def generate_room_qr(room_code, room_id):
         
         # ضع لوجو الفريق واسم الفريق في صف واحد أسفل رمز الـ QR
         logo_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'qrcodes', 'alpha-logo.png')
+        print(f"QR Generator: Looking for logo at: {logo_path}")
         logo_size = 64
         logo_y = qr_y + qr_size + 10
 
@@ -153,6 +165,7 @@ def generate_room_qr(room_code, room_id):
         start_x = (final_width - combined_width) // 2
 
         if os.path.exists(logo_path):
+            print(f"QR Generator: Logo file exists, trying to load...")
             try:
                 logo_img = Image.open(logo_path).convert("RGBA")
                 logo_img = logo_img.resize((logo_size, logo_size), Image.Resampling.LANCZOS)
@@ -162,12 +175,14 @@ def generate_room_qr(room_code, room_id):
                 text_x = start_x + logo_size + spacing
                 text_y = logo_y + (logo_size - team_height) // 2
                 draw.text((text_x, text_y), team_text, fill="#E67E22", font=font_small)
+                print(f"QR Generator: Logo loaded successfully")
             except Exception as e:
-                print(f"Error adding team logo: {e}")
+                print(f"QR Generator: Error adding team logo: {e}")
                 # في حال فشل تحميل الشعار، ارسم اسم الفريق بموقع مركزي بدلاً من الشعار
                 fallback_x = (final_width - team_width) // 2
                 draw.text((fallback_x, logo_y), team_text, fill="#E67E22", font=font_small)
         else:
+            print(f"QR Generator: Logo file does not exist")
             # إذا لم يوجد الشعار، ارسم اسم الفريق في منتصف العرض أسفل الـ QR
             fallback_x = (final_width - team_width) // 2
             draw.text((fallback_x, logo_y), team_text, fill="#E67E22", font=font_small)
@@ -237,7 +252,10 @@ def generate_room_qr(room_code, room_id):
         file_path = os.path.join(qr_folder, filename)
         try:
             final_img.save(file_path, 'PNG', quality=95, optimize=True, dpi=(300, 300))
+            print(f"QR Generator: Successfully saved QR code to: {file_path}")
+            print(f"QR Generator: QR code contains URL: {room_url}")
         except Exception as save_error:
+            print(f"QR Generator: Error saving QR code: {save_error}")
             return None
         return file_path
     

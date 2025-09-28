@@ -1,5 +1,4 @@
 from flask import Flask, jsonify, redirect, request
-from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from config import Config
 from supabase import create_client, Client
@@ -41,14 +40,6 @@ def create_app():
     # إنشاء المجلدات المطلوبة
     create_required_folders()
     
-    # إعداد CORS - السماح بالوصول من الواجهة الأمامية
-    CORS(app,
-         resources={r"/*": {"origins": "*"}},
-         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-         allow_headers=["Content-Type", "Authorization", "apikey", "Access-Control-Allow-Headers", "Origin", "Accept", "X-Requested-With"],
-         expose_headers=["Content-Type", "Authorization"],
-         supports_credentials=False)
-    
     # Register blueprints
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(dean_bp, url_prefix='/api/dean')
@@ -68,6 +59,17 @@ def create_app():
             response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,apikey")
             response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
             return response
+    
+    # Add CORS headers to all responses
+    @app.after_request
+    def add_cors_headers(response):
+        if "Access-Control-Allow-Origin" not in response.headers:
+            response.headers.add("Access-Control-Allow-Origin", "*")
+        if "Access-Control-Allow-Headers" not in response.headers:
+            response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization,apikey,Access-Control-Allow-Headers,Origin,Accept,X-Requested-With")
+        if "Access-Control-Allow-Methods" not in response.headers:
+            response.headers.add("Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS")
+        return response
     
     # Root route for testing
     @app.route('/')

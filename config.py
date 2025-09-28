@@ -15,7 +15,7 @@ class Config:
     
     # QR Code Configuration
     QR_CODE_FOLDER = 'static/qrcodes'
-    BASE_URL = os.environ.get('BASE_URL') or 'http://localhost:3000'
+    FRONTEND_URL = 'https://www.it-college.zone.id'
     
     # File Upload Configuration
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
