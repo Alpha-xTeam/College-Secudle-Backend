@@ -7,7 +7,7 @@ from models import create_student, update_student, get_student_by_id, get_studen
 from models import get_supabase # Assuming get_supabase is needed for direct schedule queries
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from flask_cors import cross_origin
-from utils.helpers import get_current_user
+from utils.helpers import get_current_user, department_access_required
 
 # Helper function to generate a unique 4-digit student ID
 def generate_unique_4_digit_id():
@@ -240,16 +240,23 @@ def get_student_by_id_route(student_id):
         return jsonify({'error': 'Student not found'}), 404
 
 @student_bp.route('/search_students', methods=['GET'])
-def search_students_route():
+@department_access_required
+def search_students_route(user):
+    """Search students. Department-heads and supervisors will see only students from their department."""
     query = request.args.get('query')
     if not query:
         return jsonify({'error': 'Query parameter is missing'}), 400
-    
-    students = search_students(query)
+
+    # Determine department filter based on user role
+    dept_filter = None
+    if user.get('role') in ['department_head', 'supervisor']:
+        dept_filter = user.get('department_id')
+
+    students = search_students(query, department_id=dept_filter)
     if students:
         return jsonify({'students': students}), 200
     else:
-        return jsonify({'message': 'No students found matching the query'}), 404
+        return jsonify({'students': [] , 'message': 'No students found matching the query'}), 200
 
 @student_bp.route('/all', methods=['GET'])
 def get_all_students():

@@ -208,14 +208,18 @@ def delete_student(student_id: str):
     response = supabase.table('students').delete().eq('student_id', student_id).execute()
     return response.data[0] if response.data else None
 
-def search_students(query: str):
+def search_students(query: str, department_id: int = None):
+    """Search students by student_id or name. If department_id is provided, limit results to that department."""
     supabase = get_supabase()
+    # Build base query
+    req = supabase.table('students').select('*')
+    if department_id:
+        # Limit to department
+        req = req.eq('department_id', department_id)
+
     # Search by student_id (exact match) or name (case-insensitive partial match)
-    response = (
-        supabase.table('students').select('*')
-        .or_(f'student_id.eq.{query},name.ilike.%{query}%')
-        .execute()
-    )
+    req = req.or_(f'student_id.eq.{query},name.ilike.%{query}%')
+    response = req.execute()
     return response.data
 
 def get_student_full_schedule(student_id: str):
