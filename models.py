@@ -233,9 +233,38 @@ def get_student_full_schedule(student_id: str):
     student_group = student.get('group') or student.get('group_name')
     student_study_type = student.get('study_type')
 
-    if not student_section or not student_stage or not student_group or not student_study_type:
-        return None # Or raise an error, depending on desired behavior
+    # --- Normalization helpers ---
+    def normalize_stage(value):
+        if value is None:
+            return None
+        s = str(value).strip()
+        # Map numeric or Arabic labels to English enum values
+        stage_map = {
+            '1': 'first', 'المرحلة الأولى': 'first', 'الاولى': 'first', 'first': 'first',
+            '2': 'second', 'المرحلة الثانية': 'second', 'الثانية': 'second', 'second': 'second',
+            '3': 'third', 'المرحلة الثالثة': 'third', 'الثالثة': 'third', 'third': 'third',
+            '4': 'fourth', 'المرحلة الرابعة': 'fourth', 'الرابعة': 'fourth', 'fourth': 'fourth'
+        }
+        return stage_map.get(s.lower(), stage_map.get(s, s))
+
+    def normalize_study_type(value):
+        if value is None:
+            return None
+        t = str(value).strip()
+        type_map = {
+            'صباحي': 'morning', 'صباح': 'morning', 'morning': 'morning',
+            'مسائي': 'evening', 'مساء': 'evening', 'evening': 'evening'
+        }
+        return type_map.get(t.lower(), type_map.get(t, t))
+
+    # Normalize stage and study_type before querying schedules
+    normalized_stage = normalize_stage(student_stage)
+    normalized_study_type = normalize_study_type(student_study_type)
+
+    # If the normalization changed values, update local student dict for clarity
+    student['academic_stage_normalized'] = normalized_stage
+    student['study_type_normalized'] = normalized_study_type
 
     # Use the modified function to get schedules by section, stage, group, and study_type
-    schedule_data = get_schedules_by_section_and_stage(student_section, student_stage, student_group, student_study_type)
+    schedule_data = get_schedules_by_section_and_stage(student_section, normalized_stage, student_group, normalized_study_type)
     return schedule_data

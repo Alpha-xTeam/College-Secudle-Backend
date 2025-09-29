@@ -237,9 +237,19 @@ def get_student_full_schedule_route(student_id):
                 schedule["has_multiple_doctors"] = len(doctor_names) > 1
     
     if schedule_data:
-        return jsonify({'student_schedule': schedule_data}), 200
+        return jsonify({'student_schedule': schedule_data, 'student': student}), 200
     else:
-        return jsonify({'message': 'No schedule found for this student or student not found'}), 404
+        # Provide debug info to the frontend so it's easier to know why no schedule was found
+        debug_info = {
+            'student': student,
+            'searched': {
+                'section': student.get('section') if student else None,
+                'group': (student.get('group') or student.get('group_name')) if student else None,
+                'academic_stage': student.get('academic_stage') if student else None,
+                'study_type': student.get('study_type') if student else None
+            }
+        }
+        return jsonify({'student_schedule': [], 'student': student, 'debug': debug_info, 'message': 'No schedule found for this student or student not found'}), 200
 
 @student_bp.route('/get_student_by_id/<string:student_id>', methods=['GET'])
 def get_student_by_id_route(student_id):
