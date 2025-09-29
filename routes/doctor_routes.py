@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from models import get_all_doctors, get_doctor_by_id, create_doctor, delete_doctor, get_all_departments, get_schedules_by_doctor_id
+from models import get_all_doctors, get_doctor_by_id, create_doctor, update_doctor, delete_doctor, get_all_departments, get_schedules_by_doctor_id
 from utils.helpers import get_user_role
 
 doctor_bp = Blueprint('doctor_bp', __name__)
@@ -60,8 +60,8 @@ def add_doctor():
     
     return protected_add_doctor()
 
-@doctor_bp.route('/<int:doctor_id>', methods=['DELETE', 'OPTIONS'])
-def delete_doctor_endpoint(doctor_id):
+@doctor_bp.route('/<int:doctor_id>', methods=['PUT', 'DELETE', 'OPTIONS'])
+def doctor_endpoint(doctor_id):
     if request.method == 'OPTIONS':
         response = jsonify()
         response.headers.add("Access-Control-Allow-Origin", "*")
@@ -69,32 +69,58 @@ def delete_doctor_endpoint(doctor_id):
         response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
         return response
     
-    # Require JWT for DELETE requests
+    # Require JWT for PUT and DELETE requests
     from flask_jwt_extended import jwt_required, get_jwt_identity
     @jwt_required()
-    def protected_delete_doctor():
+    def protected_doctor_endpoint():
         current_user_email = get_jwt_identity()
         role = get_user_role(current_user_email)
         if role not in ['admin', 'dean', 'supervisor', 'department_head']:
             return jsonify({"msg": "Admins, Deans, and Supervisors only"}), 403
         
-        # Check if doctor exists
-        doctor = get_doctor_by_id(doctor_id)
-        if not doctor:
-            return jsonify({"error": "Doctor not found"}), 404
-        
-        # Check if doctor has assigned schedules
-        schedules = get_schedules_by_doctor_id(doctor_id)
-        if schedules and len(schedules) > 0:
-            return jsonify({"error": "Cannot delete doctor. Doctor has assigned schedules."}), 400
-        
-        # Delete the doctor
-        deleted_doctor = delete_doctor(doctor_id)
-        if deleted_doctor:
-            return jsonify({"message": "Doctor deleted successfully"}), 200
-        return jsonify({"error": "Failed to delete doctor"}), 500
+        if request.method == 'PUT':
+            # Update doctor
+            # Check if doctor exists
+            doctor = get_doctor_by_id(doctor_id)
+            if not doctor:
+                return jsonify({"error": "Doctor not found"}), 404
+            
+            data = request.get_json()
+            name = data.get('name')
+            department_id = data.get('department_id')
+            
+            if not name or not department_id:
+                return jsonify({"error": "Name and department_id are required"}), 400
+            
+            # Update the doctor
+            updated_doctor = update_doctor(doctor_id, {
+                'name': name,
+                'department_id': department_id
+            })
+            
+            if updated_doctor:
+                return jsonify({"message": "Doctor updated successfully", "doctor": updated_doctor}), 200
+            return jsonify({"error": "Failed to update doctor"}), 500
+            
+        elif request.method == 'DELETE':
+            # Delete doctor
+            # Check if doctor exists
+            doctor = get_doctor_by_id(doctor_id)
+            if not doctor:
+                return jsonify({"error": "Doctor not found"}), 404
+            
+            # Check if doctor has assigned schedules
+            schedules = get_schedules_by_doctor_id(doctor_id)
+            if schedules and len(schedules) > 0:
+                return jsonify({"error": "Cannot delete doctor. Doctor has assigned schedules."}), 400
+            
+            # Delete the doctor
+            deleted_doctor = delete_doctor(doctor_id)
+            if deleted_doctor:
+                return jsonify({"message": "Doctor deleted successfully"}), 200
+            return jsonify({"error": "Failed to delete doctor"}), 500
     
-    return protected_delete_doctor()
+    return protected_doctor_endpoint()
 
 @doctor_bp.route('/<int:doctor_id>/lectures', methods=['GET', 'OPTIONS'])
 def get_doctor_lectures(doctor_id):

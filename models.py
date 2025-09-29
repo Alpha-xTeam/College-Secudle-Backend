@@ -57,18 +57,15 @@ def get_schedules_by_room_id(room_id: int):
 
 def get_schedules_by_section_and_stage(section: str, stage: str, group: str, study_type: str):
     supabase = get_supabase()
-    # Filter schedules based on lecture type and student attributes
-    # For theoretical lectures: match section_number with student section
-    # For practical lectures: match group_letter with student group
+    # Modified query to handle null values in section and group
+    # If schedule has null section/group, it should match any student
     response = (
         supabase.table('schedules').select('*, rooms!schedules_room_id_fkey(name, code), doctors!fk_doctor(name)')
         .eq('academic_stage', stage)
         .eq('study_type', study_type)
         .eq('is_active', True)
-        .or_(
-            f'and(lecture_type.eq.theoretical,section_number.eq.{section})',
-            f'and(lecture_type.eq.practical,group_letter.eq.{group})'
-        )
+        .or_(f'section.is.null,section.eq.{section}')
+        .or_(f'group.is.null,group.eq.{group}')
         .execute()
     )
     return response.data
@@ -103,6 +100,11 @@ def get_doctor_by_name(name: str):
 def create_doctor(data: dict):
     supabase = get_supabase()
     response = supabase.table('doctors').insert(data).execute()
+    return response.data[0] if response.data else None
+
+def update_doctor(doctor_id: int, data: dict):
+    supabase = get_supabase()
+    response = supabase.table('doctors').update(data).eq('id', doctor_id).execute()
     return response.data[0] if response.data else None
 
 def delete_doctor(doctor_id: int):
