@@ -1,0 +1,103 @@
+{
+  "test_config": {
+    "base_url": "http://localhost:5000",
+    "concurrent_requests": 30,
+    "timeout_seconds": 30,
+    "delay_between_tests": 3
+  },
+  "test_scenarios": [
+    {
+      "name": "اختبار خفيف",
+      "requests": 10,
+      "description": "اختبار أساسي بـ 10 طلبات متزامنة"
+    },
+    {
+      "name": "اختبار متوسط", 
+      "requests": 30,
+      "description": "اختبار عادي بـ 30 طلب متزامن"
+    },
+    {
+      "name": "اختبار شديد",
+      "requests": 50, 
+      "description": "اختبار قوي بـ 50 طلب متزامن"
+    },
+    {
+      "name": "اختبار أقصى",
+      "requests": 100,
+      "description": "اختبار الحد الأقصى بـ 100 طلب متزامن"
+    }
+  ],
+  "endpoints_to_test": [
+    {
+      "endpoint": "/",
+      "method": "GET",
+      "name": "الصفحة الرئيسية",
+      "priority": 1
+    },
+    {
+      "endpoint": "/api/health",
+      "method": "GET", 
+      "name": "فحص صحة النظام",
+      "priority": 1
+    },
+    {
+      "endpoint": "/api/departments",
+      "method": "GET",
+      "name": "قائمة الأقسام", 
+      "priority": 2
+    },
+    {
+      "endpoint": "/api/rooms",
+      "method": "GET",
+      "name": "قائمة القاعات",
+      "priority": 2
+    },
+    {
+      "endpoint": "/api/schedule/current",
+      "method": "GET",
+      "name": "الجدول الحالي",
+      "priority": 2
+    },
+    {
+      "endpoint": "/api/instructors",
+      "method": "GET", 
+      "name": "قائمة المدرسين",
+      "priority": 3
+    },
+    {
+      "endpoint": "/api/students",
+      "method": "GET",
+      "name": "قائمة الطلاب", 
+      "priority": 3
+    }
+  ],
+  "performance_thresholds": {
+    "excellent": {
+      "success_rate_min": 99,
+      "avg_response_time_max": 0.5,
+      "rps_min": 50
+    },
+    "good": {
+      "success_rate_min": 95,
+      "avg_response_time_max": 1.0,
+      "rps_min": 30
+    },
+    "acceptable": {
+      "success_rate_min": 90,
+      "avg_response_time_max": 2.0,
+      "rps_min": 20
+    },
+    "poor": {
+      "success_rate_min": 80,
+      "avg_response_time_max": 5.0,
+      "rps_min": 10
+    }
+  },
+  "reporting": {
+    "show_detailed_results": true,
+    "show_request_distribution": true,
+    "show_percentiles": true,
+    "save_results_to_file": false,
+    "results_filename": "stress_test_results.json"
+  }
+}
