@@ -585,3 +585,94 @@ def cleanup_expired_announcements():
             success=False, 
             status_code=500
         )
+
+
+@dean_bp.route("/users/<int:user_id>", methods=["PATCH"])
+@user_management_required
+def update_user_partial(user_id):
+    """تحديث جزئي لمستخدم (PATCH)"""
+    try:
+        supabase = current_app.supabase
+        data = request.get_json() or {}
+
+        # Fetch target user
+        target_res = supabase.table("users").select("*").eq("id", user_id).execute()
+        if not target_res.data:
+            return format_response(message="المستخدم غير موجود", success=False, status_code=404)
+        target_user = target_res.data[0]
+
+        # Determine current user and permissions
+        from flask_jwt_extended import get_jwt_identity
+        username = get_jwt_identity()
+        current_user = get_user_by_username(username)
+        if not current_user:
+            return format_response(message="المستخدم الحالي غير موجود", success=False, status_code=401)
+
+        # Supervisors cannot update users
+        if current_user.get("role") == "supervisor":
+            return format_response(message="ليس لديك صلاحية لتعديل المستخدمين", success=False, status_code=403)
+
+        # Department heads can only update users within their department
+        if current_user.get("role") == "department_head" and target_user.get("department_id") != current_user.get("department_id"):
+            return format_response(message="لا يمكنك تعديل مستخدمين خارج قسمك", success=False, status_code=403)
+
+        # Only dean can change role or department
+        if ("role" in data or "department_id" in data) and current_user.get("role") != "dean":
+            return format_response(message="فقط العميد يمكنه تغيير الدور أو القسم", success=False, status_code=403)
+
+        # Prevent promoting someone to dean
+        if data.get("role") == "dean":
+            return format_response(message="لا يمكن تعيين دور العميد عبر هذه الواجهة", success=False, status_code=400)
+
+        update_data = {}
+
+        # Validate username/email uniqueness if provided
+        if "username" in data and data["username"] and data["username"] != target_user.get("username"):
+            existing_res = supabase.table("users").select("id").neq("id", user_id).eq("username", data["username"]).execute()
+            if existing_res.data:
+                return format_response(message="يوجد مستخدم آخر بنفس اسم المستخدم", success=False, status_code=400)
+            update_data["username"] = data["username"]
+
+        if "email" in data and data["email"] and data["email"] != target_user.get("email"):
+            existing_res = supabase.table("users").select("id").neq("id", user_id).eq("email", data["email"]).execute()
+            if existing_res.data:
+                return format_response(message="يوجد مستخدم آخر بنفس البريد الإلكتروني", success=False, status_code=400)
+            update_data["email"] = data["email"]
+
+        if "full_name" in data and data["full_name"] and data["full_name"] != target_user.get("full_name"):
+            update_data["full_name"] = data["full_name"]
+
+        if "role" in data and data["role"] and data["role"] != target_user.get("role"):
+            if data["role"] not in ["dean", "department_head", "supervisor"]:
+                return format_response(message="نوع المستخدم غير صحيح", success=False, status_code=400)
+            update_data["role"] = data["role"]
+
+        if "department_id" in data:
+            # For dean role department_id is stored as None
+            if data.get("department_id") in [None, ""]:
+                update_data["department_id"] = None
+            else:
+                # verify department exists
+                dept_res = supabase.table("departments").select("id").eq("id", data["department_id"]).execute()
+                if not dept_res.data:
+                    return format_response(message="القسم المحدد غير موجود", success=False, status_code=400)
+                update_data["department_id"] = data["department_id"]
+
+        if "is_active" in data:
+            update_data["is_active"] = bool(data.get("is_active"))
+
+        if "password" in data and data.get("password"):
+            from models import set_password
+            update_data["password_hash"] = set_password(data["password"])
+
+        if not update_data:
+            return format_response(data=target_user, message="لم يتم تحديث أي بيانات")
+
+        updated_res = supabase.table("users").update(update_data).eq("id", user_id).execute()
+
+        return format_response(data=updated_res.data[0] if updated_res.data else {}, message="تم تحديث المستخدم بنجاح")
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return format_response(message=f"حدث خطأ: {str(e)}", success=False, status_code=500)
