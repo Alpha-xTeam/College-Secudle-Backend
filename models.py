@@ -66,8 +66,8 @@ def get_schedules_by_section_and_stage(section: str, stage: str, group: str, stu
         .eq('study_type', study_type)
         .eq('is_active', True)
         .or_(
-            f'and(lecture_type.eq.نظري,section_number.eq.{section})',
-            f'and(lecture_type.eq.عملي,group_letter.eq.{group})'
+            f'and(lecture_type.eq.theoretical,section_number.eq.{section})',
+            f'and(lecture_type.eq.practical,group_letter.eq.{group})'
         )
         .execute()
     )

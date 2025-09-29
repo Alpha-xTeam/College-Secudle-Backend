@@ -485,6 +485,9 @@ def create_schedule(room_id):
                 status_code=400,
             )
         
+        # Convert Arabic to English for database
+        db_lecture_type = "theoretical" if lecture_type == "نظري" else "practical"
+        
         # Validate section/group based on lecture type
         if lecture_type == "نظري":
             section = data.get("section")
@@ -787,7 +790,7 @@ def create_schedule(room_id):
             "end_time": data["end_time"],
             "subject_name": data["subject_name"],
             "notes": data.get("notes", ""),
-            "lecture_type": lecture_type,
+            "lecture_type": db_lecture_type,
             "section_number": section,
             "group_letter": group,
             "is_active": True
@@ -1119,6 +1122,9 @@ def update_schedule(room_id, schedule_id):
                     success=False,
                     status_code=400,
                 )
+            
+            # Convert Arabic to English for database
+            db_lecture_type = "theoretical" if lecture_type == "نظري" else "practical"
             
             # Validate section/group based on lecture type
             if lecture_type == "نظري":
