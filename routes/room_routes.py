@@ -1108,6 +1108,8 @@ def update_schedule(room_id, schedule_id):
             )
 
         data = request.get_json()
+        print(f"DEBUG: Received data for update: {data}")  # Debug log
+        
         if "subject_name" not in data:
             return format_response(
                 message="اسم المادة مطلوب", success=False, status_code=400
@@ -1379,6 +1381,13 @@ def update_schedule(room_id, schedule_id):
 
             update_data["start_time"] = data["start_time"]
             update_data["end_time"] = data["end_time"]
+
+        # Update lecture type and grouping fields
+        if db_lecture_type:
+            update_data["lecture_type"] = db_lecture_type
+            update_data["section_number"] = section if section is not None else None
+            update_data["group_letter"] = group if group is not None else None
+            print(f"DEBUG: Updating lecture fields - type: {db_lecture_type}, section: {section}, group: {group}")  # Debug log
 
         # Update the schedule
         updated_schedule_res = (
