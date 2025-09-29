@@ -93,8 +93,8 @@ def generate_room_qr(room_code, room_id, base_url=None):
         qr.add_data(room_url)
         qr.make(fit=True)
 
-        # إنشاء الصورة الأساسية للـ QR بألوان احترافية
-        qr_img = qr.make_image(fill_color=PRIMARY_COLOR, back_color=BACKGROUND_COLOR)
+        # إنشاء الصورة الأساسية للـ QR بألوان احترافية (QR must be black as requested)
+        qr_img = qr.make_image(fill_color="#000000", back_color=BACKGROUND_COLOR)
 
         # إنشاء صورة أكبر للتصميم النهائي
         final_width = 600
@@ -153,52 +153,70 @@ def generate_room_qr(room_code, room_id, base_url=None):
         # ضع لوجو الفريق واسم الفريق في صف واحد أسفل رمز الـ QR
         logo_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'qrcodes', 'alpha-logo.png')
         print(f"QR Generator: Looking for logo at: {logo_path}")
-        logo_size = 80
+        logo_size = 96
         logo_y = qr_y + qr_size + 18
 
-        team_text = "Created by Alpha Team - Cybersecurity Department"
-        # Use black for all texts except team name, so we'll split team name and rest
-        team_name = "Alpha Team"
-        prefix_text = "Created by "
-        suffix_text = " - Cybersecurity Department"
+        # Upper line (larger): CREATED BY ALPHA TEAM (ALPHA TEAM in red)
+        upper_text_prefix = "CREATED BY "
+        upper_team_name = "ALPHA TEAM"
+        # Lower line: department
+        lower_dept = "CYBERSECURITY DEPARTMENT"
 
-        # Calculate text metrics for combined layout
-        prefix_bbox = draw.textbbox((0, 0), prefix_text, font=font_small)
-        name_bbox = draw.textbbox((0, 0), team_name, font=font_small)
-        suffix_bbox = draw.textbbox((0, 0), suffix_text, font=font_small)
-        prefix_w = prefix_bbox[2] - prefix_bbox[0]
-        name_w = name_bbox[2] - name_bbox[0]
-        suffix_w = suffix_bbox[2] - suffix_bbox[0]
+        # Fonts for team lines
+        font_team_large = load_font("DejaVuSans-Bold.ttf", 18) or load_font("arialbd.ttf", 18) or font_subtitle
+        font_dept = load_font("DejaVuSans.ttf", 14) or load_font("arial.ttf", 14) or font_small
 
-        spacing = 12
-        combined_width = logo_size + spacing + prefix_w + name_w + suffix_w
+        # Measure text widths
+        upper_prefix_bbox = draw.textbbox((0,0), upper_text_prefix, font=font_team_large)
+        upper_prefix_w = upper_prefix_bbox[2] - upper_prefix_bbox[0]
+        upper_name_bbox = draw.textbbox((0,0), upper_team_name, font=font_team_large)
+        upper_name_w = upper_name_bbox[2] - upper_name_bbox[0]
+        upper_h = upper_name_bbox[3] - upper_name_bbox[1]
+
+        lower_bbox = draw.textbbox((0,0), lower_dept, font=font_dept)
+        lower_w = lower_bbox[2] - lower_bbox[0]
+        lower_h = lower_bbox[3] - lower_bbox[1]
+
+        spacing = 16
+        text_block_width = max(upper_prefix_w + upper_name_w, lower_w)
+        combined_width = logo_size + spacing + text_block_width
         start_x = (final_width - combined_width) // 2
 
         if os.path.exists(logo_path):
-            print(f"QR Generator: Logo file exists, trying to load...")
             try:
                 logo_img = Image.open(logo_path).convert("RGBA")
                 logo_img = logo_img.resize((logo_size, logo_size), Image.Resampling.LANCZOS)
                 final_img.paste(logo_img, (start_x, logo_y), logo_img)
-                # Write team text next to logo: prefix (black), team name (red), suffix (black)
+
                 text_x = start_x + logo_size + spacing
-                text_y = logo_y + (logo_size - (prefix_bbox[3] - prefix_bbox[1])) // 2
-                draw.text((text_x, text_y), prefix_text, fill=TEXT_COLOR, font=font_small)
-                draw.text((text_x + prefix_w, text_y), team_name, fill=TEAM_COLOR, font=font_small)
-                draw.text((text_x + prefix_w + name_w, text_y), suffix_text, fill=TEXT_COLOR, font=font_small)
-                print(f"QR Generator: Logo loaded and team name rendered")
+                # vertical center the two-line block relative to logo
+                total_text_height = upper_h + 6 + lower_h
+                text_y = logo_y + (logo_size - total_text_height) // 2
+
+                # Draw upper line: prefix black, team name red
+                draw.text((text_x, text_y), upper_text_prefix, fill=TEXT_COLOR, font=font_team_large)
+                draw.text((text_x + upper_prefix_w, text_y), upper_team_name, fill=TEAM_COLOR, font=font_team_large)
+
+                # Draw lower department line centered to text block
+                lower_x = text_x + (text_block_width - lower_w) // 2
+                draw.text((lower_x, text_y + upper_h + 6), lower_dept, fill=TEXT_COLOR, font=font_dept)
             except Exception as e:
                 print(f"QR Generator: Error adding team logo: {e}")
-                fallback_x = (final_width - (prefix_w + name_w + suffix_w)) // 2
-                draw.text((fallback_x, logo_y), prefix_text, fill=TEXT_COLOR, font=font_small)
-                draw.text((fallback_x + prefix_w, logo_y), team_name, fill=TEAM_COLOR, font=font_small)
-                draw.text((fallback_x + prefix_w + name_w, logo_y), suffix_text, fill=TEXT_COLOR, font=font_small)
+                # fallback: center stacked texts without logo
+                text_x = (final_width - text_block_width) // 2
+                text_y = logo_y
+                draw.text((text_x, text_y), upper_text_prefix, fill=TEXT_COLOR, font=font_team_large)
+                draw.text((text_x + upper_prefix_w, text_y), upper_team_name, fill=TEAM_COLOR, font=font_team_large)
+                lower_x = text_x + (text_block_width - lower_w) // 2
+                draw.text((lower_x, text_y + upper_h + 6), lower_dept, fill=TEXT_COLOR, font=font_dept)
         else:
-            print(f"QR Generator: Logo file does not exist")
-            fallback_x = (final_width - (prefix_w + name_w + suffix_w)) // 2
-            draw.text((fallback_x, logo_y), prefix_text, fill=TEXT_COLOR, font=font_small)
-            draw.text((fallback_x + prefix_w, logo_y), team_name, fill=TEAM_COLOR, font=font_small)
-            draw.text((fallback_x + prefix_w + name_w, logo_y), suffix_text, fill=TEXT_COLOR, font=font_small)
+            # Center stacked texts without logo
+            text_x = (final_width - text_block_width) // 2
+            text_y = logo_y
+            draw.text((text_x, text_y), upper_text_prefix, fill=TEXT_COLOR, font=font_team_large)
+            draw.text((text_x + upper_prefix_w, text_y), upper_team_name, fill=TEAM_COLOR, font=font_team_large)
+            lower_x = text_x + (text_block_width - lower_w) // 2
+            draw.text((lower_x, text_y + upper_h + 6), lower_dept, fill=TEXT_COLOR, font=font_dept)
 
         # إضافة خط فاصل أسفل منطقة الـ QR/logo
         line_y = logo_y + logo_size + 12
