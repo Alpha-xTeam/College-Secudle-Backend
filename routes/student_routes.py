@@ -2,8 +2,12 @@ from flask import Blueprint, request, jsonify, current_app
 import pandas as pd
 import uuid
 import random
+from datetime import datetime
 from models import create_student, update_student, get_student_by_id, get_students_by_section_and_stage, get_schedules_by_section_and_stage, get_all_student_ids, delete_student, search_students, get_all_departments, get_student_full_schedule
 from models import get_supabase # Assuming get_supabase is needed for direct schedule queries
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_cors import cross_origin
+from utils.helpers import get_current_user
 
 # Helper function to generate a unique 4-digit student ID
 def generate_unique_4_digit_id():
@@ -23,23 +27,70 @@ def get_department_id_by_name(department_name):
             return dept.get('id')
     return None
 
+def convert_stage_to_text(stage):
+    """Convert numeric stage to text format"""
+    stage_map = {
+        '1': 'first',
+        '2': 'second', 
+        '3': 'third',
+        '4': 'fourth'
+    }
+    return stage_map.get(str(stage).lower(), str(stage).lower())
+
+def convert_study_type_to_english(study_type):
+    """Convert Arabic study type to English"""
+    type_map = {
+        'صباحي': 'morning',
+        'مسائي': 'evening'
+    }
+    return type_map.get(study_type.lower(), study_type.lower())
+
+def get_academic_year():
+    """Get current academic year based on date (September 17th is start of academic year)"""
+    now = datetime.now()
+    current_year = now.year
+    current_month = now.month
+    current_day = now.day
+    
+    # Academic year starts on September 17th
+    academic_year_start_month = 9
+    academic_year_start_day = 17
+    
+    if (current_month > academic_year_start_month) or \
+       (current_month == academic_year_start_month and current_day >= academic_year_start_day):
+        # After September 17th, academic year is current_year - (current_year + 1)
+        academic_year = f"{current_year}_{current_year + 1}"
+    else:
+        # Before September 17th, academic year is (current_year - 1) - current_year
+        academic_year = f"{current_year - 1}_{current_year}"
+    
+    return academic_year
+
 student_bp = Blueprint('student_bp', __name__)
 
 @student_bp.route('/upload_students_excel', methods=['POST'])
+@jwt_required()
+@cross_origin()
 def upload_students_excel():
+    current_user = get_current_user()
+    if not current_user:
+        return jsonify({'error': 'User not authenticated'}), 401
+    
+    # Get department_id from current user (assuming department_head role)
+    user_department_id = current_user.get('department_id')
+    if not user_department_id:
+        return jsonify({'error': 'User department not found'}), 400
+
     if 'file' not in request.files:
         return jsonify({'error': 'No file part in the request'}), 400
     file = request.files['file']
     stage_from_form = request.form.get('stage')
     study_type_from_form = request.form.get('study_type')
-    department_id_from_form = request.form.get('department_id')
 
     if not stage_from_form:
         return jsonify({'error': 'Stage not provided in the form data'}), 400
     if not study_type_from_form:
         return jsonify({'error': 'Study type not provided in the form data'}), 400
-    if not department_id_from_form:
-        return jsonify({'error': 'Department not provided in the form data'}), 400
 
     if file.filename == '':
         return jsonify({'error': 'No selected file'}), 400
@@ -55,9 +106,8 @@ def upload_students_excel():
                 student_name = row.get('name') or row.get('Name')
                 student_section = row.get('section') or row.get('Section')
                 student_group = row.get('group') or row.get('Group')
-                student_stage = stage_from_form.lower()
-                student_study_type = (row.get('study_type') or row.get('Study Type') or study_type_from_form).lower()
-                student_department_name = row.get('department') or row.get('Department')
+                student_stage = convert_stage_to_text(stage_from_form)  # Convert to text format
+                student_study_type = convert_study_type_to_english(row.get('study_type') or row.get('Study Type') or study_type_from_form)
 
                 # Optional student_id from Excel for updates
                 excel_student_id = row.get('student_id') or row.get('Student ID')
@@ -69,18 +119,12 @@ def upload_students_excel():
                     'name': student_name,
                     'section': student_section,
                     'group': student_group,
-                    'academic_stage': student_stage
+                    'academic_stage': student_stage,
+                    'department_id': user_department_id  # Use department from current user
                 }
 
                 if student_study_type:
                     student_data['study_type'] = student_study_type
-                
-                if student_department_name:
-                    department_id = get_department_id_by_name(student_department_name)
-                    if department_id:
-                        student_data['department_id'] = department_id
-                    else:
-                        return jsonify({'error': f'Department "{student_department_name}" not found in row {index + 2}'}), 400
 
                 if excel_student_id:
                     # Attempt to update existing student
@@ -207,6 +251,52 @@ def get_all_students():
     supabase = get_supabase()
     response = supabase.table('students').select('*').execute()
     if response.data:
+        return jsonify({'students': response.data}), 200
+    else:
+        return jsonify({'message': 'No students found'}), 404
+
+@student_bp.route('/export_students', methods=['GET'])
+@jwt_required()
+@cross_origin()
+def export_students():
+    current_user = get_current_user()
+    if not current_user:
+        return jsonify({'error': 'User not authenticated'}), 401
+    
+    # Get department_id from current user (assuming department_head role)
+    user_department_id = current_user.get('department_id')
+    
+    if not user_department_id:
+        return jsonify({'error': 'User department not found'}), 400
+
+    # Get filter parameters
+    stage_filter = request.args.get('stage')
+    study_type_filter = request.args.get('study_type')
+    
+    supabase = get_supabase()
+    
+    # Build query with filters
+    query = supabase.table('students').select('*').eq('department_id', user_department_id)
+    
+    if stage_filter:
+        stage_text = convert_stage_to_text(stage_filter)  # Convert to text format
+        query = query.eq('academic_stage', stage_text)
+    
+    if study_type_filter:
+        study_type_english = convert_study_type_to_english(study_type_filter)
+        query = query.eq('study_type', study_type_english)
+    
+    response = query.execute()
+    
+    if response.data:
+        # Get department name for display
+        departments = get_all_departments()
+        dept_name_map = {dept['id']: dept['name'] for dept in departments}
+        
+        # Add department name to each student
+        for student in response.data:
+            student['department_name'] = dept_name_map.get(student.get('department_id'), 'غير محدد')
+        
         return jsonify({'students': response.data}), 200
     else:
         return jsonify({'message': 'No students found'}), 404

@@ -240,13 +240,7 @@ def generate_room_qr(room_code, room_id, base_url=None):
         draw.text((room_x, room_y), room_text, fill=TEXT_COLOR, font=font_medium)
 
         # النص السفلي (أسود)
-        footer_text = "Powered by College Schedule System"
-        footer_bbox = draw.textbbox((0, 0), footer_text, font=font_small)
-        footer_width = footer_bbox[2] - footer_bbox[0]
-        footer_x = (final_width - footer_width) // 2
-        footer_y = room_y + 58
-        draw.text((footer_x, footer_y), footer_text, fill=TEXT_COLOR, font=font_small)
-        
+      
         # إضافة زخارف في الزوايا بلمسة باهتة
         corner_size = 30
         corner_width = 4
