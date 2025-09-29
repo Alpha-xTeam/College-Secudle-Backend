@@ -164,9 +164,10 @@ def get_student_schedule(student_id):
     if not student:
         return jsonify({'error': 'Student not found'}), 404
 
+    # Normalize group fields: support both 'group' and 'group_name'
     student_section = student.get('section')
     student_stage = student.get('academic_stage')
-    student_group = student.get('group')
+    student_group = student.get('group') or student.get('group_name')
     student_study_type = student.get('study_type')
 
     if not student_section or not student_stage or not student_group or not student_study_type:
@@ -203,6 +204,15 @@ def get_student_schedule(student_id):
 
 @student_bp.route('/get_student_full_schedule/<string:student_id>', methods=['GET'])
 def get_student_full_schedule_route(student_id):
+    # When returning schedules, also ensure the student info includes group_name for frontend compatibility
+    student = get_student_by_id(student_id)
+    # Normalize group key
+    if student:
+        if 'group' in student and 'group_name' not in student:
+            student['group_name'] = student.get('group')
+        if 'group_name' in student and 'group' not in student:
+            student['group'] = student.get('group_name')
+
     schedule_data = get_student_full_schedule(student_id)
     
     # Add multiple doctors processing
@@ -235,6 +245,11 @@ def get_student_full_schedule_route(student_id):
 def get_student_by_id_route(student_id):
     student = get_student_by_id(student_id)
     if student:
+        # Normalize group keys for consistent frontend usage
+        if 'group' in student and 'group_name' not in student:
+            student['group_name'] = student.get('group')
+        if 'group_name' in student and 'group' not in student:
+            student['group'] = student.get('group_name')
         return jsonify(student), 200
     else:
         return jsonify({'error': 'Student not found'}), 404
@@ -305,9 +320,11 @@ def export_students():
         departments = get_all_departments()
         dept_name_map = {dept['id']: dept['name'] for dept in departments}
         
-        # Add department name to each student
+        # Add department name and normalized group_name to each student
         for student in response.data:
             student['department_name'] = dept_name_map.get(student.get('department_id'), 'غير محدد')
+            # Ensure frontend can read group_name consistently
+            student['group_name'] = student.get('group_name') or student.get('group') or ''
         
         return jsonify({'students': response.data}), 200
     else:

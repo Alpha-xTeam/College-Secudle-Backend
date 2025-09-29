@@ -229,7 +229,8 @@ def get_student_full_schedule(student_id: str):
 
     student_section = student.get('section')
     student_stage = student.get('academic_stage')
-    student_group = student.get('group')
+    # Support both 'group' and 'group_name' fields (some parts of the app use one or the other)
+    student_group = student.get('group') or student.get('group_name')
     student_study_type = student.get('study_type')
 
     if not student_section or not student_stage or not student_group or not student_study_type:
