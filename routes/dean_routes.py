@@ -470,6 +470,7 @@ def create_user(data):
             "username": data["username"],
             "email": data["email"],
             "full_name": data["full_name"],
+            "password": data["password"],
             "role": data["role"],
             "department_id": data.get("department_id")
             if data["role"] != "dean"
