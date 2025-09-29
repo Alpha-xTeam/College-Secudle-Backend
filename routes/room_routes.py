@@ -477,10 +477,10 @@ def create_schedule(room_id):
         data = request.get_json()
         
         # Validate lecture type and grouping
-        lecture_type = data.get("lecture_type")
-        if not lecture_type or lecture_type not in ["نظري", "عملي"]:
+        lecture_type = data.get("lecture_type", "نظري")  # Default to theoretical if not provided
+        if lecture_type not in ["نظري", "عملي"]:
             return format_response(
-                message="نوع المحاضرة مطلوب (نظري أو عملي)",
+                message="نوع المحاضرة غير صحيح (نظري أو عملي)",
                 success=False,
                 status_code=400,
             )
@@ -490,19 +490,19 @@ def create_schedule(room_id):
         
         # Validate section/group based on lecture type
         if lecture_type == "نظري":
-            section = data.get("section")
-            if not section or section not in [1, 2]:
+            section = data.get("section", 1)  # Default to section 1
+            if section is not None and section not in [1, 2]:
                 return format_response(
-                    message="الشعبة مطلوبة للمحاضرات النظرية (1 أو 2)",
+                    message="الشعبة يجب أن تكون 1 أو 2 للمحاضرات النظرية",
                     success=False,
                     status_code=400,
                 )
             group = None
         elif lecture_type == "عملي":
-            group = data.get("group")
-            if not group or group not in ["A", "B", "C", "D"]:
+            group = data.get("group", "A")  # Default to group A
+            if group is not None and group not in ["A", "B", "C", "D"]:
                 return format_response(
-                    message="الكروب مطلوب للمحاضرات العملية (A, B, C, أو D)",
+                    message="الكروب يجب أن يكون A, B, C, أو D للمحاضرات العملية",
                     success=False,
                     status_code=400,
                 )
@@ -1114,37 +1114,36 @@ def update_schedule(room_id, schedule_id):
             )
 
         # Validate lecture type and grouping for updates
-        lecture_type = data.get("lecture_type")
-        if lecture_type:
-            if lecture_type not in ["نظري", "عملي"]:
+        lecture_type = data.get("lecture_type", "نظري")  # Default to theoretical if not provided
+        if lecture_type not in ["نظري", "عملي"]:
+            return format_response(
+                message="نوع المحاضرة غير صحيح (نظري أو عملي)",
+                success=False,
+                status_code=400,
+            )
+        
+        # Convert Arabic to English for database
+        db_lecture_type = "theoretical" if lecture_type == "نظري" else "practical"
+        
+        # Validate section/group based on lecture type
+        if lecture_type == "نظري":
+            section = data.get("section", 1)  # Default to section 1
+            if section is not None and section not in [1, 2]:
                 return format_response(
-                    message="نوع المحاضرة غير صحيح (نظري أو عملي)",
+                    message="الشعبة يجب أن تكون 1 أو 2 للمحاضرات النظرية",
                     success=False,
                     status_code=400,
                 )
-            
-            # Convert Arabic to English for database
-            db_lecture_type = "theoretical" if lecture_type == "نظري" else "practical"
-            
-            # Validate section/group based on lecture type
-            if lecture_type == "نظري":
-                section = data.get("section")
-                if section is not None and section not in [1, 2]:
-                    return format_response(
-                        message="الشعبة يجب أن تكون 1 أو 2 للمحاضرات النظرية",
-                        success=False,
-                        status_code=400,
-                    )
-                group = None
-            elif lecture_type == "عملي":
-                group = data.get("group")
-                if group is not None and group not in ["A", "B", "C", "D"]:
-                    return format_response(
-                        message="الكروب يجب أن يكون A, B, C, أو D للمحاضرات العملية",
-                        success=False,
-                        status_code=400,
-                    )
-                section = None
+            group = None
+        elif lecture_type == "عملي":
+            group = data.get("group", "A")  # Default to group A
+            if group is not None and group not in ["A", "B", "C", "D"]:
+                return format_response(
+                    message="الكروب يجب أن يكون A, B, C, أو D للمحاضرات العملية",
+                    success=False,
+                    status_code=400,
+                )
+            section = None
 
         room_res = supabase.table("rooms").select("*").eq("id", room_id).execute()
         if not room_res.data:
