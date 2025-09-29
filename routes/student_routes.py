@@ -120,7 +120,8 @@ def upload_students_excel():
                     'section': student_section,
                     'group': student_group,
                     'academic_stage': student_stage,
-                    'department_id': user_department_id  # Use department from current user
+                    'department_id': user_department_id,  # Use department from current user
+                    'department_head_id': current_user.get('id')  # Record which department head uploaded this student
                 }
 
                 if student_study_type:
@@ -130,6 +131,8 @@ def upload_students_excel():
                     # Attempt to update existing student
                     existing_student = get_student_by_id(str(excel_student_id))
                     if existing_student:
+                        # Ensure department_head_id is updated to current uploader as well
+                        student_data['department_head_id'] = current_user.get('id')
                         update_student(str(excel_student_id), student_data)
                         students_data.append({'student_id': str(excel_student_id), **student_data})
                         uploaded_student_ids.add(str(excel_student_id))
@@ -140,6 +143,8 @@ def upload_students_excel():
                     # WARNING: 4-digit IDs have limited uniqueness (0000-9999). Collisions are possible in large datasets.
                     new_student_id = generate_unique_4_digit_id()
                     student_data['student_id'] = new_student_id
+                    # Ensure department_head_id is set for new students
+                    student_data['department_head_id'] = current_user.get('id')
                     create_student(student_data)
                     students_data.append(student_data)
                     uploaded_student_ids.add(new_student_id)
