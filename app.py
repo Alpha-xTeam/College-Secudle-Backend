@@ -53,13 +53,14 @@ def create_app():
     # Global OPTIONS handler for preflight requests
     @app.before_request
     def handle_preflight():
-        if request.method == "OPTIONS" and not request.blueprint:
+        if request.method == "OPTIONS":
             response = jsonify()
             response.headers.add("Access-Control-Allow-Origin", "*")
-            response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,apikey")
-            response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
+            response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,apikey,Access-Control-Allow-Headers,Origin,Accept,X-Requested-With")
+            response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,PATCH,DELETE,OPTIONS")
+            response.headers.add('Access-Control-Allow-Credentials', 'true')
             return response
-    
+
     # Add CORS headers to all responses
     @app.after_request
     def add_cors_headers(response):
@@ -68,7 +69,9 @@ def create_app():
         if "Access-Control-Allow-Headers" not in response.headers:
             response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization,apikey,Access-Control-Allow-Headers,Origin,Accept,X-Requested-With")
         if "Access-Control-Allow-Methods" not in response.headers:
-            response.headers.add("Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS")
+            response.headers.add("Access-Control-Allow-Methods", "GET,PUT,POST,PATCH,DELETE,OPTIONS")
+        if "Access-Control-Allow-Credentials" not in response.headers:
+            response.headers.add("Access-Control-Allow-Credentials", "true")
         return response
     
     # Root route for testing
