@@ -409,6 +409,8 @@ def get_room_schedules(room_id):
             .eq("is_active", True)
             .execute()
         )
+        
+        print(f"DEBUG: Retrieved schedules for room {room_id}: {schedules_res.data}")  # Debug log
 
         display_schedules = []
         from datetime import datetime, date
@@ -1383,10 +1385,10 @@ def update_schedule(room_id, schedule_id):
             update_data["end_time"] = data["end_time"]
 
         # Update lecture type and grouping fields
-        if db_lecture_type:
-            update_data["lecture_type"] = db_lecture_type
-            update_data["section_number"] = section if section is not None else None
-            update_data["group_letter"] = group if group is not None else None
+        if 'lecture_type' in data or db_lecture_type:
+            update_data["lecture_type"] = db_lecture_type or "theoretical"
+            update_data["section_number"] = section if section is not None else (1 if db_lecture_type == "theoretical" else None)
+            update_data["group_letter"] = group if group is not None else ("A" if db_lecture_type == "practical" else None)
             print(f"DEBUG: Updating lecture fields - type: {db_lecture_type}, section: {section}, group: {group}")  # Debug log
 
         # Update the schedule
