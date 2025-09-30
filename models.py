@@ -74,19 +74,38 @@ def get_schedules_by_section_and_stage(section: str, stage: str, group: str, stu
 
     candidates = response.data
 
-    def matches_section(sched_section, student_section):
+    def matches_section(sched_section, sched_section_number, student_section):
         # Treat NULL/None schedule section as a wildcard match
-        if sched_section is None:
+        if sched_section is None and sched_section_number is None:
             return True
-        return str(sched_section).strip().lower() == str(student_section or '').strip().lower()
+        # Compare by string field first
+        if sched_section is not None:
+            return str(sched_section).strip().lower() == str(student_section or '').strip().lower()
+        # Otherwise compare numeric section number if available
+        try:
+            if sched_section_number is not None and student_section is not None:
+                return int(sched_section_number) == int(student_section)
+        except Exception:
+            pass
+        return False
 
-    def matches_group(sched_group, student_group):
-        # Treat NULL/None schedule group as a wildcard match
-        if sched_group is None:
+    def matches_group(sched_group, sched_group_letter, student_group):
+        # Treat NULL/None schedule group as a wildcard match (applies to all groups)
+        if sched_group is None and sched_group_letter is None:
             return True
-        return str(sched_group).strip().lower() == str(student_group or '').strip().lower()
+        # Compare explicit group field first
+        if sched_group is not None:
+            return str(sched_group).strip().lower() == str(student_group or '').strip().lower()
+        # Compare group_letter (single letter) second
+        if sched_group_letter is not None:
+            return str(sched_group_letter).strip().upper() == str(student_group or '').strip().upper()
+        return False
 
-    filtered = [s for s in candidates if matches_section(s.get('section'), section) and matches_group(s.get('group'), group)]
+    filtered = [
+        s for s in candidates
+        if matches_section(s.get('section'), s.get('section_number'), section)
+        and matches_group(s.get('group'), s.get('group_letter'), group)
+    ]
     return filtered
 
 def get_schedules_by_doctor_id(doctor_id: int):
