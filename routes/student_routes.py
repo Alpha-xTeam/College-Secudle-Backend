@@ -170,8 +170,9 @@ def get_student_schedule(student_id):
     student_group = student.get('group') or student.get('group_name')
     student_study_type = student.get('study_type')
 
-    if not student_section or not student_stage or not student_group or not student_study_type:
-        return jsonify({'error': 'Student section, stage, group, or study type information missing'}), 500
+    # Require section, stage and study_type; group is optional (schedules may have NULL group meaning applies to all groups)
+    if not student_section or not student_stage or not student_study_type:
+        return jsonify({'error': 'Student section, stage, or study type information missing'}), 500
 
     # Use the new function to get schedules by section, stage, group, and study_type
     schedule_data = get_schedules_by_section_and_stage(student_section, student_stage, student_group, student_study_type)

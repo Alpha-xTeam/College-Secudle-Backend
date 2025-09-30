@@ -57,18 +57,37 @@ def get_schedules_by_room_id(room_id: int):
 
 def get_schedules_by_section_and_stage(section: str, stage: str, group: str, study_type: str):
     supabase = get_supabase()
-    # Modified query to handle null values in section and group
-    # If schedule has null section/group, it should match any student
+    # Fetch candidate schedules filtered by stage and study_type server-side,
+    # then apply Python-side filtering for section/group to correctly express
+    # (section IS NULL OR section = student_section) AND (group IS NULL OR group = student_group).
     response = (
-        supabase.table('schedules').select('*, rooms!schedules_room_id_fkey(name, code), doctors!fk_doctor(name)')
+        supabase.table('schedules')
+        .select('*, rooms!schedules_room_id_fkey(name, code), doctors!fk_doctor(name)')
         .eq('academic_stage', stage)
         .eq('study_type', study_type)
         .eq('is_active', True)
-        .or_(f'section.is.null,section.eq.{section}')
-        .or_(f'group.is.null,group.eq.{group}')
         .execute()
     )
-    return response.data
+
+    if not response.data:
+        return []
+
+    candidates = response.data
+
+    def matches_section(sched_section, student_section):
+        # Treat NULL/None schedule section as a wildcard match
+        if sched_section is None:
+            return True
+        return str(sched_section).strip().lower() == str(student_section or '').strip().lower()
+
+    def matches_group(sched_group, student_group):
+        # Treat NULL/None schedule group as a wildcard match
+        if sched_group is None:
+            return True
+        return str(sched_group).strip().lower() == str(student_group or '').strip().lower()
+
+    filtered = [s for s in candidates if matches_section(s.get('section'), section) and matches_group(s.get('group'), group)]
+    return filtered
 
 def get_schedules_by_doctor_id(doctor_id: int):
     supabase = get_supabase()
