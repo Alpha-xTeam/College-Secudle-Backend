@@ -485,7 +485,7 @@ def get_full_weekly_schedule(department_id, stage, study_type):
         # Include all postponement related fields
         query = (
             supabase.table("schedules")
-            .select("id,day_of_week,start_time,end_time,subject_name,instructor_name,is_postponed,postponed_date,postponed_start_time,postponed_end_time,postponed_to_room_id,is_moved_out,is_temporary_move_in,original_schedule_id,room:rooms!schedules_room_id_fkey(name,code)")
+            .select("id,day_of_week,start_time,end_time,subject_name,instructor_name,is_postponed,postponed_date,postponed_start_time,postponed_end_time,postponed_to_room_id,is_moved_out,is_temporary_move_in,original_schedule_id,room:rooms!schedules_room_id_fkey(name,code),group,group_letter,section,section_number")
             .eq("department_id", department_id)
             .eq("academic_stage", stage)
             .eq("study_type", study_type)
@@ -557,6 +557,11 @@ def get_full_weekly_schedule(department_id, stage, study_type):
                     "postponed_to_room_id": item.get("postponed_to_room_id"),
                     "is_temporary_move_in": True,
                     "original_schedule_id": item.get("original_schedule_id"),
+                    # Include grouping/section info if present
+                    "group": item.get("group"),
+                    "group_letter": item.get("group_letter"),
+                    "section": item.get("section"),
+                    "section_number": item.get("section_number"),
                     # Include multiple doctors data
                     "multiple_doctors_names": item.get("multiple_doctors_names", []),
                     "primary_doctor_name": item.get("primary_doctor_name"),
@@ -580,6 +585,11 @@ def get_full_weekly_schedule(department_id, stage, study_type):
                     "day_of_week": item.get("day_of_week"),
                     "is_postponed": False, # Explicitly mark as not postponed
                     "is_moved_out": False, # Explicitly mark as not moved out
+                    # Include grouping/section info if present
+                    "group": item.get("group"),
+                    "group_letter": item.get("group_letter"),
+                    "section": item.get("section"),
+                    "section_number": item.get("section_number"),
                     # Include multiple doctors data
                     "multiple_doctors_names": item.get("multiple_doctors_names", []),
                     "primary_doctor_name": item.get("primary_doctor_name"),
