@@ -272,7 +272,6 @@ def get_room_qr(room_code):
 
 
 @public_bp.route("/departments", methods=["GET"])
-@jwt_required()
 def get_departments_public():
     """الحصول على قائمة الأقسام (محمية)"""
     try:
