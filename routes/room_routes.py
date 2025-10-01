@@ -947,6 +947,41 @@ def create_schedule_with_multiple_doctors(data, user, room_id):
                 status_code=400,
             )
 
+        # Validate lecture type and grouping
+        lecture_type = data.get("lecture_type", "نظري")  # Default to theoretical if not provided
+        if lecture_type not in ["نظري", "عملي"]:
+            return format_response(
+                message="نوع المحاضرة غير صحيح (نظري أو عملي)",
+                success=False,
+                status_code=400,
+            )
+        
+        # Convert Arabic to English for database
+        db_lecture_type = "theoretical" if lecture_type == "نظري" else "practical"
+        
+        # Validate section/group based on lecture type
+        if lecture_type == "نظري":
+            section = data.get("section", 1)  # Default to section 1
+            academic_stage = data.get("academic_stage", "")
+            # If the academic stage is 'second' allow a third section
+            allowed_sections = [1, 2, 3] if academic_stage == 'second' else [1, 2]
+            if section is not None and section not in allowed_sections:
+                return format_response(
+                    message=f"الشعبة يجب أن تكون {' أو '.join(map(str, allowed_sections))} للمحاضرات النظرية",
+                    success=False,
+                    status_code=400,
+                )
+            group = None
+        elif lecture_type == "عملي":
+            group = data.get("group", "A")  # Default to group A
+            if group is not None and group not in ["A", "B", "C", "D", "E"]:
+                return format_response(
+                    message="الكروب يجب أن يكون A, B, C, D, أو E للمحاضرات العملية",
+                    success=False,
+                    status_code=400,
+                )
+            section = None
+
         # Handle multiple doctors
         doctor_ids = data.get("doctor_ids", [])
         primary_doctor_id = data.get("primary_doctor_id")
