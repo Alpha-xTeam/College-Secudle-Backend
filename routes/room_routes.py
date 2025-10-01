@@ -493,18 +493,21 @@ def create_schedule(room_id):
         # Validate section/group based on lecture type
         if lecture_type == "نظري":
             section = data.get("section", 1)  # Default to section 1
-            if section is not None and section not in [1, 2]:
+            academic_stage = data.get("academic_stage", "")
+            # If the academic stage is 'second' allow a third section
+            allowed_sections = [1, 2, 3] if academic_stage == 'second' else [1, 2]
+            if section is not None and section not in allowed_sections:
                 return format_response(
-                    message="الشعبة يجب أن تكون 1 أو 2 للمحاضرات النظرية",
+                    message=f"الشعبة يجب أن تكون {' أو '.join(map(str, allowed_sections))} للمحاضرات النظرية",
                     success=False,
                     status_code=400,
                 )
             group = None
         elif lecture_type == "عملي":
             group = data.get("group", "A")  # Default to group A
-            if group is not None and group not in ["A", "B", "C", "D"]:
+            if group is not None and group not in ["A", "B", "C", "D", "E"]:
                 return format_response(
-                    message="الكروب يجب أن يكون A, B, C, أو D للمحاضرات العملية",
+                    message="الكروب يجب أن يكون A, B, C, D, أو E للمحاضرات العملية",
                     success=False,
                     status_code=400,
                 )
@@ -867,20 +870,6 @@ def create_schedule(room_id):
             message=f"حدث خطأ: {str(e)}", success=False, status_code=500
         )
 
-        return format_response(
-            data=schedule_res.data[0] if schedule_res.data else None,
-            message="تم إنشاء الجدول بنجاح",
-            status_code=201,
-        )
-
-    except Exception as e:
-        print(f"ERROR in create_schedule: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return format_response(
-            message=f"حدث خطأ: {str(e)}", success=False, status_code=500
-        )
-
 
 @room_bp.route("/<int:room_id>/schedules/multi-doctor", methods=["POST"])
 @department_access_required
@@ -1048,39 +1037,82 @@ def create_schedule_with_multiple_doctors(data, user, room_id):
             "end_time": data["end_time"],
             "subject_name": data["subject_name"],
             "notes": data.get("notes", ""),
-            "is_active": True,
+            "lecture_type": db_lecture_type,
+            "section_number": section,
+            "group_letter": group,
+            "is_active": True
         }
         
-        # Set instructor_name based on primary doctor or multiple doctors
-        if primary_doctor_id:
+        # Handle instructor/doctor information based on mode
+        if use_multiple_doctors:
+            # For multiple doctors, we'll set instructor_name to the primary doctor's name
+            primary_doctor_id = data.get("primary_doctor_id") or doctor_ids[0]
             primary_doctor_res = supabase.table("doctors").select("name").eq("id", primary_doctor_id).execute()
             if primary_doctor_res.data:
                 schedule_data["instructor_name"] = primary_doctor_res.data[0]["name"]
             else:
                 schedule_data["instructor_name"] = "متعدد المدرسين"  # "Multiple instructors"
         else:
-            schedule_data["instructor_name"] = "متعدد المدرسين"  # "Multiple instructors"
-
-        schedule_res = supabase.table("schedules").insert(schedule_data).execute()
-        schedule = schedule_res.data[0]
-
-        # Add doctors to junction table
-        from models import add_doctors_to_schedule
-        schedule_doctors = add_doctors_to_schedule(schedule["id"], doctor_ids, primary_doctor_id)
-
-        # Get complete schedule with doctors for response
-        from models import get_schedule_doctors
-        schedule_with_doctors = get_schedule_doctors(schedule["id"])
-        schedule["schedule_doctors"] = schedule_with_doctors
-
-        return format_response(
-            data=schedule, message="تم إنشاء الجدول بعدة دكاترة بنجاح", status_code=201
+            # Legacy system - use instructor_name directly
+            if data.get("instructor_name"):
+                schedule_data["instructor_name"] = data["instructor_name"].strip()
+            
+            # If doctor_id is provided, also set it
+            if data.get("doctor_id"):
+                schedule_data["doctor_id"] = data["doctor_id"]
+                # If instructor_name not provided, get it from doctor
+                if not data.get("instructor_name"):
+                    doctor_res = supabase.table("doctors").select("name").eq("id", data["doctor_id"]).execute()
+                    if doctor_res.data:
+                        schedule_data["instructor_name"] = doctor_res.data[0]["name"]
+                    else:
+                        return format_response(
+                            message="الدكتور المحدد غير موجود",
+                            success=False,
+                            status_code=400,
+                        )
+        
+        schedule_res = (
+            supabase.table("schedules")
+            .insert(schedule_data)
+            .execute()
         )
+        
+        if not schedule_res.data:
+            return format_response(
+                message="فشل في إنشاء الجدول",
+                success=False,
+                status_code=500,
+            )
+        
+        schedule = schedule_res.data[0]
+        
+        # Handle multiple doctors if applicable
+        if use_multiple_doctors:
+            from models import add_doctors_to_schedule
+            primary_doctor_id = data.get("primary_doctor_id") or doctor_ids[0]
+            schedule_doctors = add_doctors_to_schedule(schedule["id"], doctor_ids, primary_doctor_id)
+            
+            # Add doctor information to response
+            from models import get_schedule_doctors
+            schedule_with_doctors = get_schedule_doctors(schedule["id"])
+            schedule["schedule_doctors"] = schedule_with_doctors
+            
+            return format_response(
+                data=schedule,
+                message="تم إنشاء الجدول بعدة دكاترة بنجاح",
+                status_code=201,
+            )
 
     except Exception as e:
+        print(f"ERROR in create_schedule: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return format_response(
             message=f"حدث خطأ: {str(e)}", success=False, status_code=500
         )
+
+
 @room_bp.route("/<int:room_id>/schedules/<int:schedule_id>", methods=["PUT"])
 @jwt_required()
 def update_schedule(room_id, schedule_id):
@@ -1132,22 +1164,32 @@ def update_schedule(room_id, schedule_id):
         # Validate section/group based on lecture type
         if lecture_type == "نظري":
             section = data.get("section", 1)  # Default to section 1
-            if section is not None and section not in [1, 2]:
+            academic_stage = data.get("academic_stage", "")
+            allowed_sections = [1, 2, 3] if academic_stage == 'second' else [1, 2]
+            if section is not None and section not in allowed_sections:
                 return format_response(
-                    message="الشعبة يجب أن تكون 1 أو 2 للمحاضرات النظرية",
+                    message=f"الشعبة يجب أن تكون {' أو '.join(map(str, allowed_sections))} للمحاضرات النظرية",
                     success=False,
                     status_code=400,
                 )
             group = None
         elif lecture_type == "عملي":
             group = data.get("group", "A")  # Default to group A
-            if group is not None and group not in ["A", "B", "C", "D"]:
+            if group is not None and group not in ["A", "B", "C", "D", "E"]:
                 return format_response(
-                    message="الكروب يجب أن يكون A, B, C, أو D للمحاضرات العملية",
+                    message="الكروب يجب أن يكون A, B, C, D, أو E للمحاضرات العملية",
                     success=False,
                     status_code=400,
                 )
             section = None
+        
+        username = get_jwt_identity()
+        user = get_user_by_username(username)
+
+        if not user:
+            return format_response(
+                message="المستخدم غير موجود", success=False, status_code=404
+            )
 
         room_res = supabase.table("rooms").select("*").eq("id", room_id).execute()
         if not room_res.data:
@@ -1174,40 +1216,6 @@ def update_schedule(room_id, schedule_id):
                 success=False,
                 status_code=403,
             )
-
-        # Validate doctor data based on mode
-        use_multiple_doctors = data.get("use_multiple_doctors", False)
-        
-        if use_multiple_doctors:
-            doctor_ids = data.get("doctor_ids", [])
-            if not doctor_ids or len(doctor_ids) == 0:
-                return format_response(
-                    message="يجب اختيار دكتور واحد على الأقل", success=False, status_code=400
-                )
-            
-            # Validate all doctor IDs exist
-            for doctor_id in doctor_ids:
-                doctor_res = supabase.table("doctors").select("id").eq("id", doctor_id).execute()
-                if not doctor_res.data:
-                    return format_response(
-                        message=f"الدكتور برقم {doctor_id} غير موجود",
-                        success=False,
-                        status_code=400,
-                    )
-        else:
-            # Single doctor mode
-            if "doctor_id" not in data or not data["doctor_id"]:
-                return format_response(
-                    message="يجب اختيار مدرس", success=False, status_code=400
-                )
-            
-            doctor_res = supabase.table("doctors").select("id").eq("id", data["doctor_id"]).execute()
-            if not doctor_res.data:
-                return format_response(
-                    message="المدرس المحدد غير موجود",
-                    success=False,
-                    status_code=400,
-                )
 
         update_data = {"subject_name": data["subject_name"]}
 
@@ -1733,7 +1741,7 @@ def postpone_schedule(room_id, schedule_id):
                 # تحقق التداخل الفعلي مع استثناء الحالات المتتالية
                 if (
                     (new_start_time < existing_end_time and new_end_time > existing_start_time)
-                    and not (new_start_time == existing_end_time or new_end_time == existing_start_time)
+                    and not (new_start_time == existing_end_time or new_end_time == start_time)
                 ):
                     conflicts.append(existing_schedule)
         
@@ -1973,7 +1981,6 @@ def upload_weekly_schedule(room_id):
             
             # Nullify original_schedule_id references to schedules in this room
             supabase.table("schedules").update({"original_schedule_id": None}).in_("original_schedule_id", schedules_to_delete_ids).execute()
-
         # Delete all existing schedules for this room before uploading new ones
         supabase.table("schedules").delete().eq("room_id", room_id).execute()
 
@@ -2086,10 +2093,9 @@ def upload_weekly_schedule(room_id):
                     .eq("study_type", row["study_type"])
                     .eq("day_of_week", row["day_of_week"])
                     .eq("is_active", True)
-                    .lt("start_time", str(row['end_time']))
-                    .gt("end_time", str(row['start_time']))
-                    .neq("end_time", str(row['start_time']))  # استثناء الحالات المتتالية
-                    .neq("start_time", str(row['end_time']))  # استثناء الحالات المتتالية
+                    .neq("id", schedule_id) # Exclude current schedule from conflict check
+                    .lt("start_time", data['end_time'])
+                    .gt("end_time", data['start_time'])
                     .execute()
                 )
 
@@ -2109,8 +2115,9 @@ def upload_weekly_schedule(room_id):
                     "subject_name": row["subject_name"],
                     "instructor_name": instructor_name,  # Always save the name for display
                     "notes": str(row.get("notes")) if pd.notna(row.get("notes")) else "",
-                    "section": str(row["section"]).strip() if pd.notna(row.get("section")) and str(row["section"]).strip() else None,  # Handle section
-                    "group": str(row["group"]).strip() if pd.notna(row.get("group")) and str(row["group"]).strip() else None,    # Handle group
+                    "lecture_type": db_lecture_type,
+                    "section_number": section,
+                    "group_letter": group,
                     "is_active": True
                 }
                 
@@ -2379,8 +2386,9 @@ def upload_general_weekly_schedule():
                         "subject_name": row["subject_name"],
                         "instructor_name": instructor_name,  # Always save the name for display
                         "notes": str(row.get("notes")) if pd.notna(row.get("notes")) else "",
-                        "section": str(row["section"]).strip() if pd.notna(row.get("section")) and str(row["section"]).strip() else None,  # Handle section
-                        "group": str(row["group"]).strip() if pd.notna(row.get("group")) and str(row["group"]).strip() else None,    # Handle group
+                        "lecture_type": db_lecture_type,
+                        "section_number": section,
+                        "group_letter": group,
                         "is_active": True,
                         "department_id": department_id, # Add department_id here
                     }
@@ -2654,8 +2662,7 @@ def delete_all_schedules(room_id):
             
             # Nullify original_schedule_id references to schedules in this room
             supabase.table("schedules").update({"original_schedule_id": None}).in_("original_schedule_id", schedules_to_delete_ids).execute()
-
-        # Delete all schedules for this room
+        # Delete all existing schedules for this room
         supabase.table("schedules").delete().eq("room_id", room_id).execute()
 
         return format_response(message="تم حذف جميع جداول القاعة بنجاح")
