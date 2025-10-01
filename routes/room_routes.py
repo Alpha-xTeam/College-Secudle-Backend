@@ -1068,6 +1068,8 @@ def create_schedule_with_multiple_doctors(data, user, room_id):
                     status_code=400,
                 )
 
+        use_multiple_doctors = True
+
         # Create schedule
         schedule_data = {
             "room_id": room_id,
