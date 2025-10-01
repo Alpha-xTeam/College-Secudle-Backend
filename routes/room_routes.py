@@ -1190,6 +1190,8 @@ def update_schedule(room_id, schedule_id):
                 )
             section = None
         
+        use_multiple_doctors = data.get("use_multiple_doctors", False)
+        
         username = get_jwt_identity()
         user = get_user_by_username(username)
 
@@ -1217,6 +1219,8 @@ def update_schedule(room_id, schedule_id):
                 message="الجدول غير موجود", success=False, status_code=404
             )
 
+        current_schedule = schedule_res.data[0]
+
         if user["role"] != "dean" and room["department_id"] != user["department_id"]:
             return format_response(
                 message="لا يمكنك تعديل جداول هذه القاعة",
@@ -1236,8 +1240,6 @@ def update_schedule(room_id, schedule_id):
                 )
             
             # Conflict check in the new room
-            current_schedule = schedule_res.data[0]
-
             conflicting_schedule_in_new_room_res = (
                 supabase.table("schedules")
                 .select("id")
@@ -1277,6 +1279,10 @@ def update_schedule(room_id, schedule_id):
         if "notes" in data:
             update_data["notes"] = data.get("notes")
 
+        # Determine study_type and day_of_week for conflict checks
+        check_study_type = data.get("study_type", current_schedule["study_type"])
+        check_day_of_week = data.get("day_of_week", current_schedule["day_of_week"])
+
         if "start_time" in data and "end_time" in data:
             if not validate_time_format(
                 data["start_time"]
@@ -1306,11 +1312,7 @@ def update_schedule(room_id, schedule_id):
                     status_code=400,
                 )
 
-            # Check for conflicting schedules
-            current_schedule = schedule_res.data[0]
-            check_study_type = data.get("study_type", current_schedule["study_type"])
-            check_day_of_week = data.get("day_of_week", current_schedule["day_of_week"])
-            
+            # Check for conflicting schedules in room
             conflicting_schedule_res = (
                 supabase.table("schedules")
                 .select("id")
@@ -1323,71 +1325,6 @@ def update_schedule(room_id, schedule_id):
                 .gt("end_time", data['start_time'])
                 .execute()
             )
-            
-            # Check doctor availability for the new time if changing doctors
-            if use_multiple_doctors:
-                doctor_ids = data.get("doctor_ids", [])
-                for doctor_id in doctor_ids:
-                    doctor_conflict_res = (
-                        supabase.table("schedule_doctors")
-                        .select("""
-                            schedules!schedule_doctors_schedule_id_fkey(
-                                id, study_type, day_of_week, start_time, end_time
-                            )
-                        """)
-                        .eq("doctor_id", doctor_id)
-                        .execute()
-                    )
-                    
-                    for schedule_doctor in doctor_conflict_res.data:
-                        schedule = schedule_doctor.get('schedules')
-                        if (schedule and 
-                            schedule['id'] != schedule_id and  # Exclude current schedule
-                            schedule['study_type'] == check_study_type and
-                            schedule['day_of_week'] == check_day_of_week):
-                            
-                            # Parse schedule times to handle comparison correctly
-                            try:
-                                sched_start = datetime.strptime(schedule['start_time'], "%H:%M:%S").time()
-                                sched_end = datetime.strptime(schedule['end_time'], "%H:%M:%S").time()
-                            except ValueError:
-                                # Fallback to %H:%M if no seconds
-                                sched_start = datetime.strptime(schedule['start_time'], "%H:%M").time()
-                                sched_end = datetime.strptime(schedule['end_time'], "%H:%M").time()
-                            
-                            if (sched_start < end_time and
-                                sched_end > start_time):
-                                
-                                doctor_info = supabase.table("doctors").select("name").eq("id", doctor_id).execute()
-                                doctor_name = doctor_info.data[0]['name'] if doctor_info.data else 'غير معروف'
-                                return format_response(
-                                    message=f"الدكتور {doctor_name} لديه تداخل في هذا الوقت مع محاضرة أخرى",
-                                    success=False,
-                                    status_code=400,
-                                )
-        else:
-            # Check single doctor availability
-            if data.get("doctor_id") and data["doctor_id"] != schedule_res.data[0].get("doctor_id"):
-                doctor_conflict_res = (
-                    supabase.table("schedules")
-                    .select("id, doctors!fk_doctor(name)")
-                    .eq("doctor_id", data["doctor_id"])
-                    .eq("study_type", check_study_type)
-                    .eq("day_of_week", check_day_of_week)
-                    .eq("is_active", True)
-                    .neq("id", schedule_id) # Exclude current schedule from conflict check
-                    .lt("start_time", data['end_time'])
-                    .gt("end_time", data['start_time'])
-                    .execute()
-                )
-                
-                if doctor_conflict_res.data:
-                    doctor_name = doctor_conflict_res.data[0].get('doctors', {}).get('name', 'غير معروف') if doctor_conflict_res.data else 'غير معروف'
-                    return format_response(
-                        message=f"الدكتور {doctor_name} لديه تداخل في هذا الوقت مع محاضرة أخرى",
-                        success=False,
-                        status_code=400,
-                    )
 
             if conflicting_schedule_res.data:
                 return format_response(
@@ -1398,6 +1335,75 @@ def update_schedule(room_id, schedule_id):
 
             update_data["start_time"] = data["start_time"]
             update_data["end_time"] = data["end_time"]
+
+        # Check doctor availability if doctor changed
+        if use_multiple_doctors:
+            doctor_ids = data.get("doctor_ids", [])
+            for doctor_id in doctor_ids:
+                doctor_conflict_res = (
+                    supabase.table("schedule_doctors")
+                    .select("""
+                        schedules!schedule_doctors_schedule_id_fkey(
+                            id, study_type, day_of_week, start_time, end_time
+                        )
+                    """)
+                    .eq("doctor_id", doctor_id)
+                    .execute()
+                )
+                
+                for schedule_doctor in doctor_conflict_res.data:
+                    schedule = schedule_doctor.get('schedules')
+                    if (schedule and 
+                        schedule['id'] != schedule_id and  # Exclude current schedule
+                        schedule['study_type'] == check_study_type and
+                        schedule['day_of_week'] == check_day_of_week):
+                        
+                        # Parse schedule times to handle comparison correctly
+                        try:
+                            sched_start = datetime.strptime(schedule['start_time'], "%H:%M:%S").time()
+                            sched_end = datetime.strptime(schedule['end_time'], "%H:%M:%S").time()
+                        except ValueError:
+                            # Fallback to %H:%M if no seconds
+                            sched_start = datetime.strptime(schedule['start_time'], "%H:%M").time()
+                            sched_end = datetime.strptime(schedule['end_time'], "%H:%M").time()
+                        
+                        # Use new times if updating, else current
+                        check_start = start_time if "start_time" in data else datetime.strptime(current_schedule['start_time'], "%H:%M").time()
+                        check_end = end_time if "end_time" in data else datetime.strptime(current_schedule['end_time'], "%H:%M").time()
+                        
+                        if (sched_start < check_end and
+                            sched_end > check_start):
+                            
+                            doctor_info = supabase.table("doctors").select("name").eq("id", doctor_id).execute()
+                            doctor_name = doctor_info.data[0]['name'] if doctor_info.data else 'غير معروف'
+                            return format_response(
+                                message=f"الدكتور {doctor_name} لديه تداخل في هذا الوقت مع محاضرة أخرى",
+                                success=False,
+                                status_code=400,
+                            )
+        else:
+            # Check single doctor availability
+            if data.get("doctor_id") and data["doctor_id"] != current_schedule.get("doctor_id"):
+                doctor_conflict_res = (
+                    supabase.table("schedules")
+                    .select("id, doctors!fk_doctor(name)")
+                    .eq("doctor_id", data["doctor_id"])
+                    .eq("study_type", check_study_type)
+                    .eq("day_of_week", check_day_of_week)
+                    .eq("is_active", True)
+                    .neq("id", schedule_id) # Exclude current schedule from conflict check
+                    .lt("start_time", data.get('end_time', current_schedule['end_time']))
+                    .gt("end_time", data.get('start_time', current_schedule['start_time']))
+                    .execute()
+                )
+                
+                if doctor_conflict_res.data:
+                    doctor_name = doctor_conflict_res.data[0].get('doctors', {}).get('name', 'غير معروف') if doctor_conflict_res.data else 'غير معروف'
+                    return format_response(
+                        message=f"الدكتور {doctor_name} لديه تداخل في هذا الوقت مع محاضرة أخرى",
+                        success=False,
+                        status_code=400,
+                    )
 
         # Update lecture type and grouping fields
         if 'lecture_type' in data or db_lecture_type:
