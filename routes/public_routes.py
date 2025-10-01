@@ -285,7 +285,6 @@ def get_departments_public():
 
 
 @public_bp.route("/search/rooms", methods=["GET"])
-@jwt_required()
 def search_rooms():
     """البحث في القاعات (محمية)"""
     try:
