@@ -11,7 +11,6 @@ from routes.admin_routes import admin_bp
 from routes.student_routes import student_bp
 from routes.doctor_routes import doctor_bp # New import
 import os
-from flask_cors import CORS
 
 def create_required_folders():
     """إنشاء المجلدات المطلوبة للتطبيق"""
@@ -40,9 +39,6 @@ def create_app():
     
     # إنشاء المجلدات المطلوبة
     create_required_folders()
-    
-    # Enable Flask-CORS to ensure CORS headers are applied consistently
-    CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
     
     # Register blueprints
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
