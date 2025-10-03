@@ -138,6 +138,19 @@ def get_schedules_by_section_and_stage(section: str, stage: str, group: str, stu
             # Fallback: if legacy instructor_name is empty, use primary doctor's name
             if not s.get('instructor_name') and primary:
                 s['instructor_name'] = primary
+
+            # Canonical display fields for frontend convenience
+            # Prefer postponed times/room when present
+            s['start_display'] = s.get('postponed_start_time') or s.get('start_time') or ''
+            s['end_display'] = s.get('postponed_end_time') or s.get('end_time') or ''
+            s['display_room_name'] = (
+                s.get('postponed_room_name')
+                or s.get('postponed_to_room_id') and None
+                or s.get('room_name')
+                or (s.get('rooms') and s.get('rooms').get('name'))
+                or s.get('room')
+                or ''
+            )
         except Exception as e:
             # Best-effort enrichment; do not fail the whole request because of enrichment issues
             try:
