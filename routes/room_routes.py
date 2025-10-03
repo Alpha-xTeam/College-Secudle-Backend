@@ -1516,7 +1516,7 @@ def delete_schedule(user, room_id, schedule_id):
 
         schedule_res = (
             supabase.table("schedules")
-            .select("id")
+            .select("*")
             .eq("id", schedule_id)
             .eq("room_id", room_id)
             .execute()
@@ -1525,6 +1525,7 @@ def delete_schedule(user, room_id, schedule_id):
             return format_response(
                 message="الجدول غير موجود", success=False, status_code=404
             )
+        schedule = schedule_res.data[0]
 
         if user["role"] != "dean" and room["department_id"] != user["department_id"]:
             return format_response(
@@ -1532,6 +1533,17 @@ def delete_schedule(user, room_id, schedule_id):
                 success=False,
                 status_code=403,
             )
+
+        # Clean up postponement relationships before deleting
+        # Nullify moved_to_schedule_id references that point to this schedule
+        supabase.table("schedules").update({"moved_to_schedule_id": None}).eq("moved_to_schedule_id", schedule_id).execute()
+        
+        # Nullify original_schedule_id references that point to this schedule
+        supabase.table("schedules").update({"original_schedule_id": None}).eq("original_schedule_id", schedule_id).execute()
+        
+        # If this schedule has a moved_to_schedule_id, delete the temporary schedule it points to
+        if schedule.get("moved_to_schedule_id"):
+            supabase.table("schedules").delete().eq("id", schedule["moved_to_schedule_id"]).execute()
 
         supabase.table("schedules").delete().eq("id", schedule_id).execute()
 
