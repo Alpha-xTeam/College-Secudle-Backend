@@ -2,6 +2,7 @@ from supabase import Client
 from flask import current_app
 import bcrypt
 import hashlib
+import random
 
 def get_supabase() -> Client:
     return current_app.supabase
@@ -188,8 +189,39 @@ def get_doctor_by_name(name: str):
     response = supabase.table('doctors').select('*, departments!doctors_department_id_fkey(name)').eq('name', name).execute()
     return response.data[0] if response.data else None
 
+# Helper: generate unique 4-digit doctor_code
+def _generate_unique_doctor_code(supabase: Client, max_attempts: int = 20000) -> int:
+    """Generate a unique 4-digit integer (1000-9999) that does not exist in doctors.doctor_code.
+    This checks the database to avoid collisions and raises if it cannot find a unique value.
+    """
+    attempts = 0
+    while attempts < max_attempts:
+        attempts += 1
+        code = random.randint(1000, 9999)
+        try:
+            resp = supabase.table('doctors').select('id').eq('doctor_code', code).limit(1).execute()
+            if not resp.data:
+                return code
+        except Exception:
+            # If DB check fails for some reason, allow a few more attempts before propagating
+            continue
+    raise Exception('Unable to generate unique 4-digit doctor_code after %d attempts' % max_attempts)
+
 def create_doctor(data: dict):
     supabase = get_supabase()
+    # Ensure a unique 4-digit doctor_code is assigned when not explicitly provided
+    if 'doctor_code' not in data or data.get('doctor_code') in (None, '', 0):
+        try:
+            data['doctor_code'] = _generate_unique_doctor_code(supabase)
+        except Exception as e:
+            # If generation fails, log and continue without setting the code (DB migration should have made column not-null)
+            try:
+                current_app.logger.error(f'create_doctor: failed to generate doctor_code: {e}')
+            except Exception:
+                pass
+            # Re-raise to prevent inserting invalid nulls for a not-null column
+            raise
+
     response = supabase.table('doctors').insert(data).execute()
     return response.data[0] if response.data else None
 
