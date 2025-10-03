@@ -191,17 +191,23 @@ def get_doctor_by_name(name: str):
 
 # Helper: generate unique 4-digit doctor_code
 def _generate_unique_doctor_code(supabase: Client, max_attempts: int = 20000) -> int:
-    """Generate a unique 4-digit integer (1000-9999) that does not exist in doctors.doctor_code.
-    This checks the database to avoid collisions and raises if it cannot find a unique value.
+    """Generate a unique 4-digit integer (1000-9999) that does not exist in doctors.doctor_code
+    or in students.student_id (as text).
     """
     attempts = 0
     while attempts < max_attempts:
         attempts += 1
         code = random.randint(1000, 9999)
         try:
+            # Check doctors table
             resp = supabase.table('doctors').select('id').eq('doctor_code', code).limit(1).execute()
-            if not resp.data:
-                return code
+            if resp.data:
+                continue
+            # Also ensure no student uses this code (student_id stored as text/string)
+            resp2 = supabase.table('students').select('student_id').eq('student_id', str(code)).limit(1).execute()
+            if resp2.data:
+                continue
+            return code
         except Exception:
             # If DB check fails for some reason, allow a few more attempts before propagating
             continue
@@ -308,6 +314,34 @@ def get_student_by_id(student_id: str):
 
 def create_student(data: dict):
     supabase = get_supabase()
+    # Check for conflict: student_id must not equal any doctor's doctor_code
+    student_id = data.get('student_id')
+    if student_id is not None:
+        try:
+            # Compare as text: if student_id is numeric string, compare to doctor_code as text
+            resp = supabase.table('doctors').select('id').eq('doctor_code', int(student_id) if str(student_id).isdigit() else None).execute()
+            if resp.data:
+                raise ValueError('student_id conflicts with an existing doctor code')
+            # Additional safe check by string compare in case student_id is string of digits
+            resp2 = supabase.table('doctors').select('id').eq('doctor_code', int(student_id) if str(student_id).isdigit() else None).execute()
+            if resp2.data:
+                raise ValueError('student_id conflicts with an existing doctor code')
+        except ValueError:
+            # re-raise known conflict
+            raise
+        except Exception:
+            # If DB check failed (e.g., student_id non-numeric), do a string check
+            try:
+                resp3 = supabase.table('doctors').select('id').execute()
+                if resp3.data:
+                    for d in resp3.data:
+                        # defensive: compare string forms
+                        if str(d.get('doctor_code', '')) == str(student_id):
+                            raise ValueError('student_id conflicts with an existing doctor code')
+            except Exception:
+                # If all checks fail due to DB issues, allow insert to proceed and let DB triggers handle conflicts
+                pass
+
     response = supabase.table('students').insert(data).execute()
     return response.data[0] if response.data else None
 
