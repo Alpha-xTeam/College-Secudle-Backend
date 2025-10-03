@@ -3,7 +3,7 @@ import pandas as pd
 import uuid
 import random
 from datetime import datetime
-from models import create_student, update_student, get_student_by_id, get_students_by_section_and_stage, get_schedules_by_section_and_stage, get_all_student_ids, delete_student, search_students, get_all_departments, get_student_full_schedule
+from models import create_student, update_student, get_student_by_id, get_students_by_section_and_stage, get_schedules_by_section_and_stage, get_student_ids_by_department_stage_study, find_student_by_unique_fields, delete_student, search_students, get_all_departments, get_student_full_schedule
 from models import get_supabase # Assuming get_supabase is needed for direct schedule queries
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from flask_cors import cross_origin
@@ -96,8 +96,12 @@ def upload_students_excel():
         return jsonify({'error': 'No selected file'}), 400
     if file and file.filename.endswith(('.xlsx', '.xls')):
         try:
-            # Get all existing student IDs before processing the new file
-            existing_student_ids = set(get_all_student_ids())
+            # Determine the target academic_stage and study_type for this upload
+            target_academic_stage = convert_stage_to_text(stage_from_form)
+            target_study_type = convert_study_type_to_english(study_type_from_form)
+
+            # Get existing student IDs only for the current department + stage + study_type
+            existing_student_ids = set(get_student_ids_by_department_stage_study(user_department_id, target_academic_stage, target_study_type))
             uploaded_student_ids = set()
 
             df = pd.read_excel(file)
@@ -106,7 +110,9 @@ def upload_students_excel():
                 student_name = row.get('name') or row.get('Name')
                 student_section = row.get('section') or row.get('Section')
                 student_group = row.get('group') or row.get('Group')
-                student_stage = convert_stage_to_text(stage_from_form)  # Convert to text format
+                # Use the upload form's stage as the canonical stage for all rows
+                student_stage = target_academic_stage
+                # Allow per-row study_type to override the form-provided type if present
                 student_study_type = convert_study_type_to_english(row.get('study_type') or row.get('Study Type') or study_type_from_form)
 
                 # Optional student_id from Excel for updates
@@ -139,17 +145,27 @@ def upload_students_excel():
                     else:
                         return jsonify({'error': f'Student with ID {excel_student_id} not found for update in row {index + 2}'}), 404
                 else:
-                    # Create new student with generated ID
-                    # WARNING: 4-digit IDs have limited uniqueness (0000-9999). Collisions are possible in large datasets.
-                    new_student_id = generate_unique_4_digit_id()
-                    student_data['student_id'] = new_student_id
-                    # Ensure department_head_id is set for new students
-                    student_data['department_head_id'] = current_user.get('id')
-                    create_student(student_data)
-                    students_data.append(student_data)
-                    uploaded_student_ids.add(new_student_id)
+                    # Try to find an existing student by unique identifying fields so we don't change their ID
+                    matched = find_student_by_unique_fields(user_department_id, student_name, student_section, student_group, student_stage, student_study_type)
+                    if matched:
+                        # Update the matched student but do NOT change their student_id
+                        matched_id = matched.get('student_id')
+                        student_data['department_head_id'] = current_user.get('id')
+                        update_student(str(matched_id), student_data)
+                        students_data.append({'student_id': str(matched_id), **student_data})
+                        uploaded_student_ids.add(str(matched_id))
+                    else:
+                        # Create new student with generated ID
+                        # WARNING: 4-digit IDs have limited uniqueness (0000-9999). Collisions are possible in large datasets.
+                        new_student_id = generate_unique_4_digit_id()
+                        student_data['student_id'] = new_student_id
+                        # Ensure department_head_id is set for new students
+                        student_data['department_head_id'] = current_user.get('id')
+                        create_student(student_data)
+                        students_data.append(student_data)
+                        uploaded_student_ids.add(new_student_id)
             
-            # Delete students not present in the uploaded Excel file
+            # Delete students not present in the uploaded Excel file, scoped to the current department/stage/study_type
             for student_id_to_delete in existing_student_ids - uploaded_student_ids:
                 delete_student(student_id_to_delete)
 

@@ -468,3 +468,59 @@ def get_recent_general_student_usages(limit: int = 200):
         except Exception:
             pass
         return []
+
+def get_student_ids_by_department_stage_study(department_id: int, academic_stage: str, study_type: str):
+    """Return list of student_id strings that belong to a specific department,
+    academic stage and study_type. Used to determine which students should be
+    considered for deletion when syncing from an uploaded Excel file.
+    """
+    supabase = get_supabase()
+    try:
+        response = (
+            supabase.table('students')
+            .select('student_id')
+            .eq('department_id', department_id)
+            .eq('academic_stage', academic_stage)
+            .eq('study_type', study_type)
+            .execute()
+        )
+        return [item['student_id'] for item in response.data] if response.data else []
+    except Exception:
+        # Best-effort: return empty list on failure so caller can decide how to proceed
+        try:
+            current_app.logger.exception('get_student_ids_by_department_stage_study failed')
+        except Exception:
+            pass
+        return []
+
+
+def find_student_by_unique_fields(department_id: int, name: str, section: str, group: str, academic_stage: str, study_type: str):
+    """Attempt to find a single student matching the provided identifying fields.
+
+    Matching strategy:
+    - department_id must match
+    - name, section, group, academic_stage and study_type are matched exactly if provided
+    - returns the first matching student dict or None
+    """
+    supabase = get_supabase()
+    try:
+        req = supabase.table('students').select('*').eq('department_id', department_id)
+        if name is not None:
+            req = req.eq('name', name)
+        if section is not None:
+            req = req.eq('section', section)
+        if group is not None:
+            # Some records may use 'group_name' instead of 'group'; try both if needed
+            req = req.eq('group', group)
+        if academic_stage is not None:
+            req = req.eq('academic_stage', academic_stage)
+        if study_type is not None:
+            req = req.eq('study_type', study_type)
+        response = req.execute()
+        return response.data[0] if response.data else None
+    except Exception:
+        try:
+            current_app.logger.exception('find_student_by_unique_fields failed')
+        except Exception:
+            pass
+        return None
