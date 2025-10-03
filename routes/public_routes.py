@@ -1,6 +1,6 @@
 from flask import Blueprint, request, send_file, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from models import get_room_by_code, get_schedules_by_room_id, get_all_departments
+from models import get_room_by_code, get_schedules_by_room_id, get_all_departments, log_general_page_usage
 from utils.qr_generator import generate_room_qr
 from utils.helpers import format_response
 import os
@@ -607,3 +607,24 @@ def get_full_weekly_schedule(department_id, stage, study_type):
         return format_response(
             message=f"حدث خطأ في الخادم: {str(e)}", success=False, status_code=500
         )
+
+
+@public_bp.route('/log/student', methods=['POST'])
+def log_student_usage():
+    """Log when a student uses the General page by submitting their student ID.
+
+    Accepts JSON: { studentId: string, name?: string, meta?: object }
+    This endpoint is intentionally public (no auth) because General page can be used anonymously.
+    """
+    try:
+        data = request.get_json(force=True) or {}
+        student_id = data.get('studentId') or data.get('student_id')
+        student_name = data.get('name') or data.get('student_name')
+        meta = data.get('meta') or {}
+        if not student_id:
+            return format_response(message='studentId is required', success=False, status_code=400)
+
+        record = log_general_page_usage(student_id, student_name, page='general', meta=meta)
+        return format_response(data=record, message='Logged student usage')
+    except Exception as e:
+        return format_response(message=f'Failed to log usage: {str(e)}', success=False, status_code=500)

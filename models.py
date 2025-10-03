@@ -425,3 +425,46 @@ def get_student_full_schedule(student_id: str):
     # Use the modified function to get schedules by section, stage, group, and study_type
     schedule_data = get_schedules_by_section_and_stage(student_section, normalized_stage, student_group, normalized_study_type)
     return schedule_data
+
+def log_general_page_usage(student_id: str, student_name: str = None, page: str = 'general', meta: dict = None):
+    """Insert a usage record for the General page (or other pages).
+
+    Returns the inserted row dict or None.
+    """
+    supabase = get_supabase()
+    payload = {
+        'student_id': str(student_id) if student_id is not None else None,
+        'student_name': student_name,
+        'page': page,
+        'meta': meta or {}
+    }
+    try:
+        res = supabase.table('general_student_usage').insert(payload).execute()
+        return res.data[0] if res.data else None
+    except Exception:
+        # best-effort: do not raise to avoid breaking client flows
+        try:
+            current_app.logger.exception('Failed to insert general_student_usage record')
+        except Exception:
+            pass
+        return None
+
+
+def get_recent_general_student_usages(limit: int = 200):
+    """Fetch recent usage records ordered by used_at desc."""
+    supabase = get_supabase()
+    try:
+        res = (
+            supabase.table('general_student_usage')
+            .select('*')
+            .order('used_at', desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return res.data if res.data else []
+    except Exception:
+        try:
+            current_app.logger.exception('Failed to fetch general_student_usage records')
+        except Exception:
+            pass
+        return []

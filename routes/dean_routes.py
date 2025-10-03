@@ -7,6 +7,7 @@ from models import (
     get_room_by_code,
     get_schedules_by_room_id,
     get_all_announcements,
+    get_recent_general_student_usages,
 )
 from utils.helpers import validate_json_data, format_response, admin_required, user_management_required
 from datetime import datetime, timedelta
@@ -677,3 +678,19 @@ def update_user_partial(user_id):
         import traceback
         traceback.print_exc()
         return format_response(message=f"حدث خطأ: {str(e)}", success=False, status_code=500)
+
+
+@dean_bp.route('/student_usages', methods=['GET'])
+@admin_required
+def dean_get_student_usages():
+    """Return recent student usages of the General page. Query param 'limit' optional."""
+    try:
+        limit = request.args.get('limit')
+        try:
+            limit = int(limit) if limit else 200
+        except Exception:
+            limit = 200
+        usages = get_recent_general_student_usages(limit=limit)
+        return format_response(data=usages, message='Recent student usages fetched')
+    except Exception as e:
+        return format_response(message=str(e), success=False, status_code=500)
