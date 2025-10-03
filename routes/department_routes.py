@@ -593,3 +593,198 @@ def dept_delete_announcement(user, ann_id):
         return format_response(message="تم حذف الإعلان")
     except Exception as e:
         return format_response(message=str(e), success=False, status_code=500)
+
+
+@dept_bp.route("/available-rooms/<int:department_id>", methods=["GET"])
+@department_access_required
+def get_available_rooms_for_department(user, department_id):
+    """الحصول على القاعات الفارغة لقسم معين في وقت محدد مع التحقق من المدة"""
+    try:
+        supabase = current_app.supabase
+        
+        # الحصول على معاملات الوقت
+        day_of_week = request.args.get("day_of_week")
+        start_time = request.args.get("start_time")
+        end_time = request.args.get("end_time")
+        study_type = request.args.get("study_type", "morning")
+        date = request.args.get("date")  # التاريخ المطلوب للنقل
+        
+        if not all([day_of_week, start_time, end_time]):
+            return format_response(
+                message="يجب تحديد اليوم ووقت البداية ووقت النهاية",
+                success=False,
+                status_code=400
+            )
+        
+        # حساب مدة المحاضرة الأصلية بالدقائق
+        from datetime import datetime
+        try:
+            original_start = datetime.strptime(start_time, "%H:%M")
+            original_end = datetime.strptime(end_time, "%H:%M")
+            original_duration_minutes = int((original_end - original_start).total_seconds() / 60)
+        except ValueError:
+            return format_response(
+                message="صيغة الوقت غير صحيحة، يجب أن تكون HH:MM",
+                success=False,
+                status_code=400
+            )
+        
+        # جلب قاعات القسم المحدد
+        rooms_res = supabase.table("rooms").select("*").eq("department_id", department_id).eq("is_active", True).execute()
+        
+        if not rooms_res.data:
+            return format_response(
+                data=[],
+                message="لا توجد قاعات فعالة في هذا القسم"
+            )
+        
+        available_rooms = []
+        
+        for room in rooms_res.data:
+            # جلب جميع الجداول للقاعة في نفس اليوم ونوع الدراسة
+            schedules_res = supabase.table("schedules").select("*").eq("room_id", room["id"]).eq("day_of_week", day_of_week).eq("study_type", study_type).execute()
+            
+            # ترتيب الجداول حسب الوقت
+            room_schedules = sorted(schedules_res.data, key=lambda x: x["start_time"])
+            
+            # التحقق من التداخل مع الجداول العادية
+            has_conflict = False
+            conflict_details = None
+            
+            for schedule in room_schedules:
+                schedule_start = schedule["start_time"]
+                schedule_end = schedule["end_time"]
+                
+                # فحص التداخل الزمني
+                if (start_time < schedule_end and end_time > schedule_start):
+                    has_conflict = True
+                    conflict_details = {
+                        "type": "regular",
+                        "subject": schedule["subject_name"],
+                        "time": f"{schedule_start} - {schedule_end}",
+                        "stage": schedule["academic_stage"]
+                    }
+                    break
+            
+            # إذا لم يكن هناك تداخل مع الجداول العادية، فحص النقل المؤقت
+            if not has_conflict and date:
+                postponed_res = supabase.table("schedules").select("*").eq("postponed_to_room_id", room["id"]).eq("postponed_date", date).execute()
+                
+                for postponed in postponed_res.data:
+                    postponed_start = postponed["postponed_start_time"]
+                    postponed_end = postponed["postponed_end_time"]
+                    
+                    if postponed_start and postponed_end and (start_time < postponed_end and end_time > postponed_start):
+                        has_conflict = True
+                        conflict_details = {
+                            "type": "temporary",
+                            "subject": postponed["subject_name"],
+                            "time": f"{postponed_start} - {postponed_end}",
+                            "stage": postponed["academic_stage"],
+                            "original_room": postponed["room_id"]
+                        }
+                        break
+            
+            # إذا كانت القاعة متاحة، احسب مدة التوفر
+            availability_info = None
+            duration_warning = None
+            
+            if not has_conflict:
+                # البحث عن المحاضرة التالية لحساب مدة التوفر
+                next_schedule = None
+                previous_schedule = None
+                
+                for schedule in room_schedules:
+                    if schedule["start_time"] > end_time:
+                        if next_schedule is None or schedule["start_time"] < next_schedule["start_time"]:
+                            next_schedule = schedule
+                    elif schedule["end_time"] <= start_time:
+                        if previous_schedule is None or schedule["end_time"] > previous_schedule["end_time"]:
+                            previous_schedule = schedule
+                
+                # حساب بداية ونهاية الفترة المتاحة
+                available_from = previous_schedule["end_time"] if previous_schedule else "06:00"
+                available_until = next_schedule["start_time"] if next_schedule else "23:59"
+                
+                # حساب المدة الكاملة المتاحة
+                try:
+                    available_start_dt = datetime.strptime(available_from, "%H:%M")
+                    available_end_dt = datetime.strptime(available_until, "%H:%M")
+                    total_available_minutes = int((available_end_dt - available_start_dt).total_seconds() / 60)
+                    
+                    # حساب المدة المتاحة بعد انتهاء المحاضرة المطلوبة
+                    required_end_dt = datetime.strptime(end_time, "%H:%M")
+                    remaining_minutes = int((available_end_dt - required_end_dt).total_seconds() / 60)
+                    
+                    availability_info = {
+                        "total_minutes": total_available_minutes,
+                        "remaining_minutes": remaining_minutes,
+                        "available_from": available_from,
+                        "available_until": available_until,
+                        "next_subject": next_schedule["subject_name"] if next_schedule else None,
+                        "previous_subject": previous_schedule["subject_name"] if previous_schedule else None
+                    }
+                    
+                    # التحقق من كفاية المدة المتاحة للمحاضرة الأصلية
+                    required_start_dt = datetime.strptime(start_time, "%H:%M")
+                    available_duration_for_lecture = int((available_end_dt - required_start_dt).total_seconds() / 60)
+                    
+                    if available_duration_for_lecture < original_duration_minutes:
+                        duration_warning = {
+                            "type": "insufficient",
+                            "available_duration": available_duration_for_lecture,
+                            "required_duration": original_duration_minutes,
+                            "shortage": original_duration_minutes - available_duration_for_lecture
+                        }
+                    elif available_duration_for_lecture == original_duration_minutes:
+                        duration_warning = {
+                            "type": "exact",
+                            "message": "المدة متطابقة تماماً مع المحاضرة الأصلية"
+                        }
+                    elif available_duration_for_lecture > original_duration_minutes * 2:
+                        duration_warning = {
+                            "type": "excess",
+                            "message": "القاعة متاحة لمدة طويلة"
+                        }
+                        
+                except ValueError:
+                    availability_info = {"error": "خطأ في حساب الأوقات"}
+            
+            # إضافة معلومات القاعة فقط إذا كانت متاحة
+            if not has_conflict:
+                room_info = {
+                    "id": room["id"],
+                    "name": room["name"],
+                    "code": room["code"],
+                    "capacity": room.get("capacity"),
+                    "location": room.get("location"),
+                    "is_available": True,
+                    "availability_info": availability_info,
+                    "duration_warning": duration_warning,
+                    "original_duration_minutes": original_duration_minutes
+                }
+                available_rooms.append(room_info)
+        
+        # ترتيب القاعات حسب مناسبة المدة (الأقرب للمدة المطلوبة أولاً)
+        def sort_key(room):
+            if room["availability_info"] and "total_minutes" in room["availability_info"]:
+                available_duration = room["availability_info"]["total_minutes"]
+                # تفضيل القاعات التي مدتها المتاحة قريبة من مدة المحاضرة الأصلية
+                duration_diff = abs(available_duration - original_duration_minutes)
+                return duration_diff
+            return float('inf')
+        
+        available_rooms.sort(key=sort_key)
+        
+        return format_response(
+            data=available_rooms,
+            message=f"تم العثور على {len(available_rooms)} قاعة متاحة في القسم للوقت المحدد"
+        )
+        
+    except Exception as e:
+        current_app.logger.error(f"Error getting available rooms: {str(e)}")
+        return format_response(
+            message=f"حدث خطأ: {str(e)}",
+            success=False,
+            status_code=500
+        )
