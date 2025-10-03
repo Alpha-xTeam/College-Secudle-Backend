@@ -106,6 +106,46 @@ def get_schedules_by_section_and_stage(section: str, stage: str, group: str, stu
         if matches_section(s.get('section'), s.get('section_number'), section)
         and matches_group(s.get('group'), s.get('group_letter'), group)
     ]
+
+    # Enrich each schedule with schedule_doctors (primary + assistants) and
+    # ensure instructor_name is filled from primary doctor when missing.
+    for s in filtered:
+        try:
+            sd = get_schedule_doctors(s.get('id')) or []
+            # attach raw schedule_doctors to the schedule object
+            s['schedule_doctors'] = sd
+
+            primary = None
+            assistants = []
+            for entry in sd:
+                # Each entry may contain nested doctors info under 'doctors'
+                doc = None
+                if isinstance(entry, dict):
+                    if entry.get('doctors') and isinstance(entry.get('doctors'), dict):
+                        doc = entry['doctors'].get('name')
+                    else:
+                        # Some responses may include a flat doctor_name
+                        doc = entry.get('doctor_name') or entry.get('name')
+                if entry.get('is_primary'):
+                    primary = doc or primary
+                else:
+                    if doc:
+                        assistants.append(doc)
+
+            s['primary_doctor_name'] = primary
+            s['assistants'] = assistants
+
+            # Fallback: if legacy instructor_name is empty, use primary doctor's name
+            if not s.get('instructor_name') and primary:
+                s['instructor_name'] = primary
+        except Exception as e:
+            # Best-effort enrichment; do not fail the whole request because of enrichment issues
+            try:
+                current_app.logger.warning(f'get_schedules_by_section_and_stage: failed enriching schedule {s.get("id")}: {e}')
+            except Exception:
+                # ignore logging failures
+                pass
+
     return filtered
 
 def get_schedules_by_doctor_id(doctor_id: int):
