@@ -163,9 +163,45 @@ def get_schedules_by_section_and_stage(section: str, stage: str, group: str, stu
     return filtered
 
 def get_schedules_by_doctor_id(doctor_id: int):
+    """Return schedules associated with a doctor.
+
+    This function looks for schedules where the doctor is the primary `doctor_id`
+    and also searches the `schedule_doctors` junction table to find schedules
+    where the doctor is attached as an assistant. Returns a list (possibly empty)
+    or [] on failure.
+    """
     supabase = get_supabase()
-    response = supabase.table('schedules').select('*, rooms!schedules_room_id_fkey(name, code), doctors!fk_doctor(name)').eq('doctor_id', doctor_id).execute()
-    return response.data
+    try:
+        # 1) Schedules where doctor is the primary assigned (doctor_id column)
+        primary_resp = supabase.table('schedules').select('*, rooms!schedules_room_id_fkey(name, code), schedule_doctors(*), doctors!fk_doctor(name)').eq('doctor_id', doctor_id).execute()
+        results = primary_resp.data if primary_resp and primary_resp.data else []
+
+        # 2) Find any schedule IDs where doctor appears in schedule_doctors
+        junction_resp = supabase.table('schedule_doctors').select('schedule_id').eq('doctor_id', doctor_id).execute()
+        schedule_ids = [r['schedule_id'] for r in (junction_resp.data or [])] if junction_resp and junction_resp.data else []
+
+        # 3) Fetch schedules for those IDs (avoid duplicates)
+        if schedule_ids:
+            # Use IN query to fetch matching schedules and include related rooms/doctors/schedule_doctors
+            try:
+                secondary_resp = supabase.table('schedules').select('*, rooms!schedules_room_id_fkey(name, code), schedule_doctors(*), doctors!fk_doctor(name)').in_('id', schedule_ids).execute()
+            except Exception:
+                # some clients use .in_ alternatively named; fallback to per-id fetch
+                secondary_resp = None
+            secondary_data = secondary_resp.data if secondary_resp and secondary_resp.data else []
+            # Append schedules not already present
+            existing_ids = {s['id'] for s in results if 'id' in s}
+            for s in secondary_data:
+                if s.get('id') not in existing_ids:
+                    results.append(s)
+
+        return results
+    except Exception:
+        try:
+            current_app.logger.exception('get_schedules_by_doctor_id failed')
+        except Exception:
+            pass
+        return []
 
 # --- Announcement Model Functions ---
 def get_all_announcements():

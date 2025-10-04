@@ -168,8 +168,9 @@ def get_doctor_lectures_by_code(code_value):
         return jsonify({"error": "Doctor not found"}), 404
     doctor_id = doctor.get('id')
     lectures = get_schedules_by_doctor_id(doctor_id)
+    # Return the (possibly empty) list of lectures. Treat None as server error.
     if lectures is None:
-        return jsonify({"error": "No lectures found or doctor not found"}), 404
+        return jsonify({"error": "Internal server error"}), 500
     return jsonify(lectures), 200
 
 
