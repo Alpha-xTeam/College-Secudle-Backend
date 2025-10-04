@@ -412,6 +412,36 @@ def get_room_schedules(room_id):
         
         print(f"DEBUG: Retrieved schedules for room {room_id}: {schedules_res.data}")  # Debug log
 
+        # إثراء كل جدول ببيانات المحاضرين
+        from backend.models import get_schedule_doctors
+        for schedule in schedules_res.data:
+            schedule_doctors = get_schedule_doctors(schedule["id"])
+            schedule["schedule_doctors"] = schedule_doctors
+            
+            # إنشاء قائمة بأسماء المحاضرين للعرض
+            if schedule_doctors:
+                doctor_names = []
+                primary_doctor = None
+                for sd in schedule_doctors:
+                    doctor_name = sd.get('doctors', {}).get('name', '')
+                    if doctor_name:  # إضافة الأسماء غير الفارغة فقط
+                        if sd.get('is_primary'):
+                            primary_doctor = doctor_name
+                        doctor_names.append(doctor_name)
+                
+                schedule["multiple_doctors_names"] = doctor_names
+                schedule["primary_doctor_name"] = primary_doctor
+                schedule["has_multiple_doctors"] = len(doctor_names) > 1
+            else:
+                # لا توجد محاضرين متعددين، تعيين القيم الافتراضية
+                schedule["multiple_doctors_names"] = []
+                schedule["primary_doctor_name"] = None
+                schedule["has_multiple_doctors"] = False
+            
+            # ملء حقل instructor_name إذا كان فارغاً باستخدام اسم المحاضر الأساسي
+            if not schedule.get("instructor_name") and schedule.get("primary_doctor_name"):
+                schedule["instructor_name"] = schedule["primary_doctor_name"]
+
         display_schedules = []
         from datetime import datetime, date
 
@@ -1839,6 +1869,21 @@ def postpone_schedule(room_id, schedule_id):
         new_temporary_schedule_res = supabase.table("schedules").insert(new_temporary_schedule_data).execute()
         new_temporary_schedule = new_temporary_schedule_res.data[0]
 
+        # نسخ بيانات المحاضرين من الجدول الأصلي إلى الجدول المؤقت الجديد
+        from backend.models import get_schedule_doctors
+        original_schedule_doctors = get_schedule_doctors(original_schedule["id"])
+        if original_schedule_doctors:
+            schedule_doctors_copy = []
+            for doctor in original_schedule_doctors:
+                schedule_doctors_copy.append({
+                    "schedule_id": new_temporary_schedule["id"],
+                    "doctor_id": doctor["doctor_id"],
+                    "is_primary": doctor["is_primary"]
+                })
+            
+            if schedule_doctors_copy:
+                supabase.table("schedule_doctors").insert(schedule_doctors_copy).execute()
+
         # Update the original schedule to mark it as moved out and link to the new temporary schedule
         update_original_schedule_data = {
             "is_moved_out": True,
@@ -1852,6 +1897,41 @@ def postpone_schedule(room_id, schedule_id):
         }
         
         supabase.table("schedules").update(update_original_schedule_data).eq("id", schedule_id).execute()
+
+        # جلب معلومات المحاضرين للمحاضرة الأصلية لإدراجها في الإعلانات
+        from backend.models import get_schedule_doctors
+        original_schedule_doctors = get_schedule_doctors(original_schedule["id"])
+        primary_doctor_name = original_schedule.get("instructor_name")
+        assistant_names = []
+        
+        if original_schedule_doctors:
+            for doctor in original_schedule_doctors:
+                if doctor.get("is_primary") and doctor.get("doctors"):
+                    primary_doctor_name = doctor["doctors"].get("name", primary_doctor_name)
+                elif not doctor.get("is_primary") and doctor.get("doctors"):
+                    assistant_names.append(doctor["doctors"].get("name"))
+
+        # إنشاء البيانات المهيكلة للإعلانات
+        meta_data = {
+            "subject": original_schedule["subject_name"],
+            "instructor_name": primary_doctor_name,
+            "assistants": assistant_names,
+            "from_room_code": original_room_code,
+            "to_room_code": new_room_code,
+            "from_department": original_dept_name,
+            "to_department": new_dept_name,
+            "postponed_date": data["postponed_date"],
+            "start_time": data["postponed_start_time"],
+            "end_time": data["postponed_end_time"],
+            "reason": data["postponed_reason"],
+            "original_schedule_id": original_schedule["id"],
+            "temporary_schedule_id": new_temporary_schedule["id"],
+            "academic_stage": original_schedule.get("academic_stage"),
+            "lecture_type": original_schedule.get("lecture_type"),
+            "section_number": original_schedule.get("section_number"),
+            "group_letter": original_schedule.get("group_letter"),
+            "day_of_week": arabic_day_of_week
+        }
 
         # جلب معلومات القسمين
         original_room_info = supabase.table("rooms").select("code", "department_id").eq("id", original_schedule['room_id']).execute()
@@ -1900,7 +1980,8 @@ def postpone_schedule(room_id, schedule_id):
                 "is_active": True,
                 "department_id": new_dept_id,
                 "starts_at": f"{data['postponed_date']} {data['postponed_start_time']}",
-                "expires_at": f"{data['postponed_date']} {data['postponed_end_time']}"
+                "expires_at": f"{data['postponed_date']} {data['postponed_end_time']}",
+                "meta": meta_data
             }).execute()
 
             # إعلان القاعة المنقولة منها
@@ -1915,7 +1996,8 @@ def postpone_schedule(room_id, schedule_id):
                 "is_active": True,
                 "department_id": original_dept_id,
                 "starts_at": f"{data['postponed_date']} {data['postponed_start_time']}",
-                "expires_at": f"{data['postponed_date']} {data['postponed_end_time']}"
+                "expires_at": f"{data['postponed_date']} {data['postponed_end_time']}",
+                "meta": meta_data
             }).execute()
         else:
             # إعلان موحد لنفس القسم
@@ -1930,7 +2012,8 @@ def postpone_schedule(room_id, schedule_id):
                 "is_active": True,
                 "department_id": original_dept_id,
                 "starts_at": f"{data['postponed_date']} {data['postponed_start_time']}",
-                "expires_at": f"{data['postponed_date']} {data['postponed_end_time']}"
+                "expires_at": f"{data['postponed_date']} {data['postponed_end_time']}",
+                "meta": meta_data
             }).execute()
 
         return format_response(
