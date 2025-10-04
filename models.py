@@ -3,6 +3,8 @@ from flask import current_app
 import bcrypt
 import hashlib
 import random
+from datetime import datetime
+
 
 def get_supabase() -> Client:
     return current_app.supabase
@@ -162,6 +164,22 @@ def get_schedules_by_section_and_stage(section: str, stage: str, group: str, stu
 
     return filtered
 
+def _format_time_12(time_str: str) -> str:
+    """Convert 'HH:MM:SS' or 'HH:MM' to 12-hour format with Arabic AM/PM markers."""
+    if not time_str:
+        return ''
+    for fmt in ('%H:%M:%S', '%H:%M'):
+        try:
+            t = datetime.strptime(time_str, fmt)
+            out = t.strftime('%I:%M %p').lstrip('0')
+            # Replace AM/PM with Arabic equivalents
+            out = out.replace('AM', 'ص').replace('PM', 'م')
+            return out
+        except Exception:
+            continue
+    # If parsing fails, return original string
+    return time_str
+
 def get_schedules_by_doctor_id(doctor_id: int):
     """Return schedules associated with a doctor.
 
@@ -177,7 +195,7 @@ def get_schedules_by_doctor_id(doctor_id: int):
         results = primary_resp.data if primary_resp and primary_resp.data else []
 
         # 2) Find any schedule IDs where doctor appears in schedule_doctors
-        junction_resp = supabase.table('schedule_doctors').select('schedule_id').eq('doctor_id', doctor_id).execute()
+        junction_resp = supabase.table('schedule_doctors').select('schedule_id, doctor_id, is_primary').eq('doctor_id', doctor_id).execute()
         schedule_ids = [r['schedule_id'] for r in (junction_resp.data or [])] if junction_resp and junction_resp.data else []
 
         # 3) Fetch schedules for those IDs (avoid duplicates)
@@ -194,6 +212,113 @@ def get_schedules_by_doctor_id(doctor_id: int):
             for s in secondary_data:
                 if s.get('id') not in existing_ids:
                     results.append(s)
+
+        # Enrich results with helpful display fields and doctor-role information
+        for s in results:
+            try:
+                sd = get_schedule_doctors(s.get('id')) or []
+                # attach raw schedule_doctors to the schedule object
+                s['schedule_doctors'] = sd
+
+                primary = None
+                assistants = []
+                for entry in sd:
+                    # Each entry may contain nested doctors info under 'doctors'
+                    doc = None
+                    if isinstance(entry, dict):
+                        if entry.get('doctors') and isinstance(entry.get('doctors'), dict):
+                            doc = entry['doctors'].get('name')
+                        else:
+                            # Some responses may include a flat doctor_name
+                            doc = entry.get('doctor_name') or entry.get('name')
+                    if entry.get('is_primary'):
+                        primary = doc or primary
+                    else:
+                        if doc:
+                            assistants.append(doc)
+
+                s['primary_doctor_name'] = primary
+                s['assistants'] = assistants
+
+                # Fallback: if legacy instructor_name is empty, use primary doctor's name
+                if not s.get('instructor_name') and primary:
+                    s['instructor_name'] = primary
+
+                # Canonical display fields for frontend convenience
+                # Prefer postponed times/room when present
+                s['start_display'] = s.get('postponed_start_time') or s.get('start_time') or ''
+                s['end_display'] = s.get('postponed_end_time') or s.get('end_time') or ''
+                s['display_room_name'] = (
+                    s.get('postponed_room_name')
+                    or s.get('postponed_to_room_id') and None
+                    or s.get('room_name')
+                    or (s.get('rooms') and s.get('rooms').get('name'))
+                    or s.get('room')
+                    or ''
+                )
+
+                # --- New enrichments requested by UI ---
+                # 1) Add 12-hour formatted time strings
+                s['start_display_12'] = _format_time_12(s.get('start_display'))
+                s['end_display_12'] = _format_time_12(s.get('end_display'))
+
+                # 2) Add structured room info (name and code)
+                s['display_room'] = {
+                    'name': s.get('display_room_name') or '',
+                    'code': (s.get('rooms') and s.get('rooms').get('code')) or s.get('room_code') or ''
+                }
+
+                # 3) Lecture type display and appropriate group/section field
+                lt = (s.get('lecture_type') or '').lower()
+                if 'practic' in lt or 'عملي' in lt:
+                    s['lecture_type_display'] = 'عملي'
+                    s['group_display'] = s.get('group') or s.get('group_letter') or ''
+                    s['section_display'] = None
+                else:
+                    s['lecture_type_display'] = 'نظري'
+                    s['section_display'] = s.get('section') or s.get('section_number') or ''
+                    s['group_display'] = None
+
+                # 4) Enrich schedule_doctors entries with role labels (primary/assistant)
+                for entry in sd:
+                    try:
+                        entry['role'] = 'primary' if entry.get('is_primary') else 'assistant'
+                        entry['role_display'] = 'أساسي' if entry.get('is_primary') else 'مساعد'
+                    except Exception:
+                        # best-effort, do not fail
+                        pass
+
+                # 5) Mark the role of the requested doctor for this schedule (if present)
+                try:
+                    if s.get('doctor_id') == doctor_id:
+                        s['this_doctor_role'] = 'primary'
+                        s['this_doctor_role_display'] = 'أساسي'
+                    else:
+                        found_role = None
+                        for entry in sd:
+                            entry_doc_id = entry.get('doctor_id') or (entry.get('doctors') and entry.get('doctors').get('id'))
+                            if entry_doc_id == doctor_id:
+                                found_role = 'primary' if entry.get('is_primary') else 'assistant'
+                                break
+                        if found_role == 'primary':
+                            s['this_doctor_role'] = 'primary'
+                            s['this_doctor_role_display'] = 'أساسي'
+                        elif found_role == 'assistant':
+                            s['this_doctor_role'] = 'assistant'
+                            s['this_doctor_role_display'] = 'مساعد'
+                        else:
+                            s['this_doctor_role'] = None
+                            s['this_doctor_role_display'] = None
+                except Exception:
+                    pass
+
+            except Exception as e:
+                # Best-effort enrichment; do not fail the whole request because of enrichment issues
+                try:
+                    current_app.logger.warning(f'get_schedules_by_doctor_id: failed enriching schedule {s.get("id")}: {e}')
+                except Exception:
+                    # ignore logging failures
+                    pass
 
         return results
     except Exception:
