@@ -37,48 +37,24 @@ def login():
         temp_used = False
         # First try main password
         if not check_password(user['password_hash'], password):
-            # Try temp password if present and not expired
+            # Try temp password if present and not yet used
             tp_hash = user.get('temp_password_hash')
-            tp_exp = user.get('temp_password_expires_at')
-            if tp_hash and tp_exp:
-                exp_dt = None
-                try:
-                    from datetime import timezone as _tz
-                    # If it's already a datetime object, use it directly
-                    if isinstance(tp_exp, datetime):
-                        exp_dt = tp_exp
-                    elif isinstance(tp_exp, (int, float)):
-                        # Epoch timestamp in seconds
-                        exp_dt = datetime.fromtimestamp(float(tp_exp), tz=_tz.utc)
-                    elif isinstance(tp_exp, str):
-                        tp_exp_str = tp_exp
-                        if tp_exp_str.endswith('Z'):
-                            tp_exp_str = tp_exp_str.replace('Z', '+00:00')
-                        exp_dt = datetime.fromisoformat(tp_exp_str)
-                    # Ensure timezone-aware (attach UTC if missing)
-                    if exp_dt is not None and exp_dt.tzinfo is None:
-                        exp_dt = exp_dt.replace(tzinfo=_tz.utc)
-                except Exception:
-                    exp_dt = None
-                now = datetime.now(timezone.utc)
-                # Diagnostic logging (no sensitive contents)
-                try:
-                    current_app.logger.info(f"login: temp_exp type={type(tp_exp)}, parsed_exp={type(exp_dt)}, now_tzinfo={now.tzinfo}")
-                    ok_check = False
-                    if exp_dt and exp_dt >= now:
-                        ok_check = check_password(tp_hash, password)
-                    current_app.logger.info(f"login: temp password valid_time={bool(exp_dt and exp_dt >= now)}, check_pass={ok_check}")
-                except Exception:
-                    # swallow logging errors
-                    pass
-
-                if not exp_dt:
-                    return format_response(message='كلمة المرور المؤقتة غير صالحة', success=False, status_code=401)
-                if exp_dt < now:
-                    return format_response(message='انتهت صلاحية كلمة المرور المؤقتة', success=False, status_code=401)
-                if not check_password(tp_hash, password):
-                    return format_response(message='كلمة المرور المؤقتة غير صحيحة', success=False, status_code=401)
-                temp_used = True
+            tp_used_flag = user.get('temp_password_used')
+            if tp_hash and not tp_used_flag:
+                # If the temp password matches, mark it used (one-time) and allow login
+                if check_password(tp_hash, password):
+                    # Persist temp_password_used = True to prevent reuse
+                    try:
+                        current_app.supabase.table('users').update({'temp_password_used': True}).eq('id', user.get('id')).execute()
+                    except Exception:
+                        # Non-fatal: log and continue
+                        current_app.logger.exception('Failed to mark temp_password_used')
+                    temp_used = True
+                else:
+                    return format_response(message='كلمة المرور غير صحيحة', success=False, status_code=401)
+            else:
+                # No temp hash or already used
+                return format_response(message='كلمة المرور غير صحيحة أو مستخدمة مسبقاً', success=False, status_code=401)
         
         # إنشاء JWT token باستخدام username كـ string بسيط
         access_token = create_access_token(identity=user['username'])
@@ -154,30 +130,11 @@ def change_password(data):
             valid_current = True
             used_temp = False
         else:
-            # Check temp password (and expiration)
+            # Check temp password (no expiry — one-time token semantics handled at login)
             tp_hash = user.get('temp_password_hash')
-            tp_exp = user.get('temp_password_expires_at')
-            if tp_hash and tp_exp:
-                exp_dt = None
-                try:
-                    from datetime import timezone as _tz
-                    if isinstance(tp_exp, datetime):
-                        exp_dt = tp_exp
-                    elif isinstance(tp_exp, (int, float)):
-                        exp_dt = datetime.fromtimestamp(float(tp_exp), tz=_tz.utc)
-                    elif isinstance(tp_exp, str):
-                        tp_exp_str = tp_exp
-                        if tp_exp_str.endswith('Z'):
-                            tp_exp_str = tp_exp_str.replace('Z', '+00:00')
-                        exp_dt = datetime.fromisoformat(tp_exp_str)
-                    if exp_dt is not None and exp_dt.tzinfo is None:
-                        exp_dt = exp_dt.replace(tzinfo=_tz.utc)
-                except Exception:
-                    exp_dt = None
-                now = datetime.now(timezone.utc)
-                if exp_dt and exp_dt >= now and check_password(tp_hash, current):
-                    valid_current = True
-                    used_temp = True
+            if tp_hash and check_password(tp_hash, current):
+                valid_current = True
+                used_temp = True
 
         if not valid_current:
             return format_response(
@@ -193,7 +150,8 @@ def change_password(data):
         update_payload = {
             'password_hash': new_password_hash,
             'temp_password_hash': None,
-            'temp_password_expires_at': None
+            'temp_password_expires_at': None,
+            'temp_password_used': True
         }
         response = supabase.table('users').update(update_payload).eq('username', username).execute()
 

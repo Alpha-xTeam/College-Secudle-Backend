@@ -738,20 +738,19 @@ def generate_temp_password(user_id):
         if not user_res.data:
             return format_response(message='المستخدم غير موجود', success=False, status_code=404)
 
-        # Generate a secure temporary password (8-12 chars) using secrets
+        # Generate a secure temporary password (10 chars) using secrets
         import secrets, string
         alphabet = string.ascii_letters + string.digits
         temp_password = ''.join(secrets.choice(alphabet) for _ in range(10))
 
-        # Hash and store temp password hash + expiry (10 minutes)
+        # Hash and store temp password hash without expiry; mark as unused (one-time)
         from models import set_password
         temp_hash = set_password(temp_password)
-        # Use timezone-aware UTC timestamp so DB returns offset-aware ISO string
-        expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
 
         update_res = supabase.table('users').update({
             'temp_password_hash': temp_hash,
-            'temp_password_expires_at': expires_at
+            'temp_password_expires_at': None,
+            'temp_password_used': False
         }).eq('id', user_id).execute()
 
         # Return plaintext temp_password once
@@ -824,6 +823,7 @@ def debug_temp_password(user_id):
             'user_id': u.get('id'),
             'username': u.get('username'),
             'email': u.get('email'),
+            'temp_password_used_flag': u.get('temp_password_used'),
             'temp_exists': temp_exists,
             'temp_expires_at_raw': tp_exp,
             'temp_expires_at_parsed': exp_dt.isoformat() if exp_dt is not None else None,
