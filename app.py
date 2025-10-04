@@ -26,13 +26,8 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
-    # Enable CORS for API routes using configured origins (supports credentials)
-    # Parse CORS_ORIGINS from config (comma-separated) and normalize
-    cors_origins_config = app.config.get('CORS_ORIGINS', '*') or '*'
-    allowed_origins = [o.strip() for o in cors_origins_config.split(',') if o.strip()]
-    # If allowed_origins contains a single '*' use wildcard, else pass list to flask-cors
-    cors_init_origins = '*' if (len(allowed_origins) == 1 and allowed_origins[0] == '*') else allowed_origins
-    CORS(app, resources={r"/api/*": {"origins": cors_init_origins}}, supports_credentials=True)
+    # Enable CORS for API routes (explicit init via flask_cors to cover error responses and preflight)
+    CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
 
     # Configure file upload limits
     app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
@@ -64,25 +59,17 @@ def create_app():
     def handle_preflight():
         if request.method == "OPTIONS":
             response = jsonify()
-            origin = request.headers.get('Origin')
-            # If origin is allowed, echo it; otherwise use wildcard if configured
-            if cors_init_origins == '*' or (origin and origin in allowed_origins):
-                response.headers.add("Access-Control-Allow-Origin", origin if origin else '*')
+            response.headers.add("Access-Control-Allow-Origin", "*")
             response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,apikey,Access-Control-Allow-Headers,Origin,Accept,X-Requested-With")
             response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,PATCH,DELETE,OPTIONS")
             response.headers.add('Access-Control-Allow-Credentials', 'true')
             return response
+
     # Add CORS headers to all responses
     @app.after_request
     def add_cors_headers(response):
-        origin = request.headers.get('Origin')
-        if cors_init_origins == '*':
-            # Allow any origin
+        if "Access-Control-Allow-Origin" not in response.headers:
             response.headers.add("Access-Control-Allow-Origin", "*")
-        else:
-            # If request has an Origin and it's allowed, echo it
-            if origin and origin in allowed_origins:
-                response.headers.add("Access-Control-Allow-Origin", origin)
         if "Access-Control-Allow-Headers" not in response.headers:
             response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization,apikey,Access-Control-Allow-Headers,Origin,Accept,X-Requested-With")
         if "Access-Control-Allow-Methods" not in response.headers:

@@ -1,10 +1,9 @@
-from flask import Blueprint, request, send_file, current_app, Response, jsonify
+from flask import Blueprint, request, send_file, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from models import get_room_by_code, get_schedules_by_room_id, get_all_departments, log_general_page_usage
 from utils.qr_generator import generate_room_qr
 from utils.helpers import format_response
 import os
-import requests
 
 public_bp = Blueprint("public", __name__)
 
@@ -629,25 +628,3 @@ def log_student_usage():
         return format_response(data=record, message='Logged student usage')
     except Exception as e:
         return format_response(message=f'Failed to log usage: {str(e)}', success=False, status_code=500)
-
-@public_bp.route('/proxy/room/<room_code>', methods=['GET'])
-def proxy_remote_room(room_code):
-    """Proxy a remote room info endpoint to avoid client-side CORS issues."""
-    remote_base = current_app.config.get('REMOTE_API_BASE')
-    url = f"{remote_base}/public/room/{room_code}"
-    try:
-        r = requests.get(url, timeout=8)
-        return Response(r.content, status=r.status_code, content_type=r.headers.get('Content-Type', 'application/json'))
-    except requests.RequestException as e:
-        return format_response(message=f"Failed to fetch remote room data: {str(e)}", success=False, status_code=502)
-
-@public_bp.route('/proxy/room/<room_code>/announcements', methods=['GET'])
-def proxy_remote_room_announcements(room_code):
-    """Proxy remote announcements endpoint to avoid client-side CORS issues."""
-    remote_base = current_app.config.get('REMOTE_API_BASE')
-    url = f"{remote_base}/public/room/{room_code}/announcements"
-    try:
-        r = requests.get(url, timeout=8)
-        return Response(r.content, status=r.status_code, content_type=r.headers.get('Content-Type', 'application/json'))
-    except requests.RequestException as e:
-        return format_response(message=f"Failed to fetch remote announcements: {str(e)}", success=False, status_code=502)
