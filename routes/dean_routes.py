@@ -694,3 +694,42 @@ def dean_get_student_usages():
         return format_response(data=usages, message='Recent student usages fetched')
     except Exception as e:
         return format_response(message=str(e), success=False, status_code=500)
+
+
+@dean_bp.route('/users/<int:user_id>/generate_temp_password', methods=['POST'])
+@user_management_required
+def generate_temp_password(user_id):
+    """Generate a one-time temporary password for a user and return it to the caller.
+    The plaintext is returned only once in the response; the hashed value and expiry
+    are stored in the users table so the plaintext is not persisted beyond the
+    short-lived window. This helps create images containing a temporary password
+    without exposing the real stored password hash.
+    """
+    try:
+        supabase = current_app.supabase
+        # Verify user exists
+        user_res = supabase.table('users').select('id, email').eq('id', user_id).execute()
+        if not user_res.data:
+            return format_response(message='المستخدم غير موجود', success=False, status_code=404)
+
+        # Generate a secure temporary password (8-12 chars) using secrets
+        import secrets, string
+        alphabet = string.ascii_letters + string.digits
+        temp_password = ''.join(secrets.choice(alphabet) for _ in range(10))
+
+        # Hash and store temp password hash + expiry (10 minutes)
+        from models import set_password
+        temp_hash = set_password(temp_password)
+        expires_at = (datetime.utcnow() + timedelta(minutes=10)).isoformat()
+
+        update_res = supabase.table('users').update({
+            'temp_password_hash': temp_hash,
+            'temp_password_expires_at': expires_at
+        }).eq('id', user_id).execute()
+
+        # Return plaintext temp_password once
+        return format_response(data={'temp_password': temp_password, 'email': user_res.data[0].get('email')}, message='تم توليد كلمة مؤقتة', status_code=200)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return format_response(message=f'حدث خطأ أثناء توليد كلمة مؤقتة: {str(e)}', success=False, status_code=500)
