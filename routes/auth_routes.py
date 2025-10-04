@@ -2,7 +2,7 @@ from flask import Blueprint, request, current_app
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from models import get_user_by_username, get_user_by_email, check_password, set_password
 from utils.helpers import validate_json_data, format_response
-from datetime import datetime
+from datetime import datetime, timezone
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -42,10 +42,16 @@ def login():
             tp_exp = user.get('temp_password_expires_at')
             if tp_hash and tp_exp:
                 try:
-                    exp_dt = datetime.fromisoformat(tp_exp)
+                    # Normalize ISO string: convert trailing 'Z' to '+00:00' for fromisoformat
+                    tp_exp_str = tp_exp if not (isinstance(tp_exp, str) and tp_exp.endswith('Z')) else tp_exp.replace('Z', '+00:00')
+                    exp_dt = datetime.fromisoformat(tp_exp_str)
+                    # Ensure timezone-aware (attach UTC if missing)
+                    if exp_dt.tzinfo is None:
+                        from datetime import timezone as _tz
+                        exp_dt = exp_dt.replace(tzinfo=_tz.utc)
                 except Exception:
                     exp_dt = None
-                now = datetime.utcnow()
+                now = datetime.now(timezone.utc)
                 if exp_dt and exp_dt >= now and check_password(tp_hash, password):
                     temp_used = True
                 else:
@@ -140,10 +146,14 @@ def change_password(data):
             tp_exp = user.get('temp_password_expires_at')
             if tp_hash and tp_exp:
                 try:
-                    exp_dt = datetime.fromisoformat(tp_exp)
+                    tp_exp_str = tp_exp if not (isinstance(tp_exp, str) and tp_exp.endswith('Z')) else tp_exp.replace('Z', '+00:00')
+                    exp_dt = datetime.fromisoformat(tp_exp_str)
+                    if exp_dt.tzinfo is None:
+                        from datetime import timezone as _tz
+                        exp_dt = exp_dt.replace(tzinfo=_tz.utc)
                 except Exception:
                     exp_dt = None
-                now = datetime.utcnow()
+                now = datetime.now(timezone.utc)
                 if exp_dt and exp_dt >= now and check_password(tp_hash, current):
                     valid_current = True
                     used_temp = True

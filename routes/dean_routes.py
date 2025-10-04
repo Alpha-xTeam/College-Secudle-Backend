@@ -10,7 +10,7 @@ from models import (
     get_recent_general_student_usages,
 )
 from utils.helpers import validate_json_data, format_response, admin_required, user_management_required
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 dean_bp = Blueprint("dean", __name__)
 
@@ -720,7 +720,8 @@ def generate_temp_password(user_id):
         # Hash and store temp password hash + expiry (10 minutes)
         from models import set_password
         temp_hash = set_password(temp_password)
-        expires_at = (datetime.utcnow() + timedelta(minutes=10)).isoformat()
+        # Use timezone-aware UTC timestamp so DB returns offset-aware ISO string
+        expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
 
         update_res = supabase.table('users').update({
             'temp_password_hash': temp_hash,
