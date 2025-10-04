@@ -61,20 +61,24 @@ def login():
                 except Exception:
                     exp_dt = None
                 now = datetime.now(timezone.utc)
-                if exp_dt and exp_dt >= now and check_password(tp_hash, password):
-                    temp_used = True
-                else:
-                    return format_response(
-                        message='كلمة المرور غير صحيحة',
-                        success=False,
-                        status_code=401
-                    )
-            else:
-                return format_response(
-                    message='كلمة المرور غير صحيحة',
-                    success=False,
-                    status_code=401
-                )
+                # Diagnostic logging (no sensitive contents)
+                try:
+                    current_app.logger.info(f"login: temp_exp type={type(tp_exp)}, parsed_exp={type(exp_dt)}, now_tzinfo={now.tzinfo}")
+                    ok_check = False
+                    if exp_dt and exp_dt >= now:
+                        ok_check = check_password(tp_hash, password)
+                    current_app.logger.info(f"login: temp password valid_time={bool(exp_dt and exp_dt >= now)}, check_pass={ok_check}")
+                except Exception:
+                    # swallow logging errors
+                    pass
+
+                if not exp_dt:
+                    return format_response(message='كلمة المرور المؤقتة غير صالحة', success=False, status_code=401)
+                if exp_dt < now:
+                    return format_response(message='انتهت صلاحية كلمة المرور المؤقتة', success=False, status_code=401)
+                if not check_password(tp_hash, password):
+                    return format_response(message='كلمة المرور المؤقتة غير صحيحة', success=False, status_code=401)
+                temp_used = True
         
         # إنشاء JWT token باستخدام username كـ string بسيط
         access_token = create_access_token(identity=user['username'])
