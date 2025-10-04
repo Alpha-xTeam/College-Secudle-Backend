@@ -16,7 +16,7 @@ def admin_required(f):
             user = get_user_by_username(username)
             role = user.get('role') if user else None
             if not user or role not in ['dean', 'department_head']:
-                return jsonify({'error': 'Admin access required'}), 403
+                return format_response(data=None, message='مطلوب صلاحيات العميد', success=False, status_code=403)
             
             return f(*args, **kwargs)
             
@@ -24,7 +24,7 @@ def admin_required(f):
             print(f"❌ خطأ في admin_required: {str(e)}")
             import traceback
             traceback.print_exc()
-            return jsonify({'error': 'Authentication failed'}), 500
+            return format_response(data=None, message='فشل المصادقة', success=False, status_code=500)
             
     return decorated_function
 
@@ -41,7 +41,7 @@ def user_management_required(f):
             user = get_user_by_username(username)
             role = user.get('role') if user else None
             if not user or role not in ['dean', 'department_head', 'supervisor']:
-                return jsonify({'error': 'User management access required'}), 403
+                return format_response(data=None, message='مطلوب صلاحيات إدارة المستخدمين', success=False, status_code=403)
             
             return f(*args, **kwargs)
             
@@ -49,7 +49,7 @@ def user_management_required(f):
             print(f"❌ خطأ في user_management_required: {str(e)}")
             import traceback
             traceback.print_exc()
-            return jsonify({'error': 'Authentication failed'}), 500
+            return format_response(data=None, message='فشل المصادقة', success=False, status_code=500)
             
     return decorated_function
 
@@ -65,17 +65,17 @@ def department_access_required(f):
             # البحث عن المستخدم في قاعدة البيانات
             user = get_user_by_username(username)
             if not user:
-                return jsonify({'error': 'User not found'}), 404
+                return format_response(data=None, message='المستخدم غير موجود', success=False, status_code=404)
             
             role = user.get('role')
             if role not in ['dean', 'department_head', 'supervisor']:
-                return jsonify({'error': 'Access denied'}), 403
+                return format_response(data=None, message='تم رفض الوصول', success=False, status_code=403)
             
             return f(user=user, *args, **kwargs)
             
         except Exception as e:
             print(f"❌ خطأ في المصادقة: {str(e)}")
-            return jsonify({'error': 'Authentication failed'}), 500
+            return format_response(data=None, message='فشل المصادقة', success=False, status_code=500)
             
     return decorated_function
 

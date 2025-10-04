@@ -11,6 +11,7 @@ from routes.admin_routes import admin_bp
 from routes.student_routes import student_bp
 from routes.doctor_routes import doctor_bp # New import
 import os
+from flask_cors import CORS
 
 def create_required_folders():
     """إنشاء المجلدات المطلوبة للتطبيق"""
@@ -24,7 +25,10 @@ def create_app():
     """إنشاء التطبيق وإعداده"""
     app = Flask(__name__)
     app.config.from_object(Config)
-    
+
+    # Enable CORS for API routes (explicit init via flask_cors to cover error responses and preflight)
+    CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
+
     # Configure file upload limits
     app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
     
