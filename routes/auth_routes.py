@@ -2,6 +2,7 @@ from flask import Blueprint, request, current_app
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from models import get_user_by_username, get_user_by_email, check_password, set_password
 from utils.helpers import validate_json_data, format_response
+from datetime import datetime
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -33,20 +34,44 @@ def login():
                 status_code=401
             )
         
+        temp_used = False
+        # First try main password
         if not check_password(user['password_hash'], password):
-            return format_response(
-                message='كلمة المرور غير صحيحة',
-                success=False,
-                status_code=401
-            )
+            # Try temp password if present and not expired
+            tp_hash = user.get('temp_password_hash')
+            tp_exp = user.get('temp_password_expires_at')
+            if tp_hash and tp_exp:
+                try:
+                    exp_dt = datetime.fromisoformat(tp_exp)
+                except Exception:
+                    exp_dt = None
+                now = datetime.utcnow()
+                if exp_dt and exp_dt >= now and check_password(tp_hash, password):
+                    temp_used = True
+                else:
+                    return format_response(
+                        message='كلمة المرور غير صحيحة',
+                        success=False,
+                        status_code=401
+                    )
+            else:
+                return format_response(
+                    message='كلمة المرور غير صحيحة',
+                    success=False,
+                    status_code=401
+                )
         
         # إنشاء JWT token باستخدام username كـ string بسيط
         access_token = create_access_token(identity=user['username'])
         
+        # Sanitize user object (do not return password hashes)
+        safe_user = {k: v for k, v in user.items() if k not in ('password_hash', 'temp_password_hash', 'temp_password_expires_at')}
+
         return format_response(
             data={
                 'access_token': access_token,
-                'user': user
+                'user': safe_user,
+                'must_change_password': temp_used
             },
             message=f"مرحباً {user['full_name']} - تم تسجيل الدخول بنجاح"
         )
@@ -103,7 +128,27 @@ def change_password(data):
             )
         
         # التحقق من كلمة المرور الحالية
-        if not check_password(user['password_hash'], data['current_password']):
+        current = data['current_password']
+        valid_current = False
+        # Check main password
+        if check_password(user['password_hash'], current):
+            valid_current = True
+            used_temp = False
+        else:
+            # Check temp password (and expiration)
+            tp_hash = user.get('temp_password_hash')
+            tp_exp = user.get('temp_password_expires_at')
+            if tp_hash and tp_exp:
+                try:
+                    exp_dt = datetime.fromisoformat(tp_exp)
+                except Exception:
+                    exp_dt = None
+                now = datetime.utcnow()
+                if exp_dt and exp_dt >= now and check_password(tp_hash, current):
+                    valid_current = True
+                    used_temp = True
+
+        if not valid_current:
             return format_response(
                 message='كلمة المرور الحالية غير صحيحة',
                 success=False,
@@ -113,7 +158,13 @@ def change_password(data):
         # تحديث كلمة المرور
         new_password_hash = set_password(data['new_password'])
         supabase = current_app.supabase
-        response = supabase.table('users').update({'password_hash': new_password_hash}).eq('username', username).execute()
+        # Update password and remove any temp password fields if present
+        update_payload = {
+            'password_hash': new_password_hash,
+            'temp_password_hash': None,
+            'temp_password_expires_at': None
+        }
+        response = supabase.table('users').update(update_payload).eq('username', username).execute()
 
         if response.get('error'):
             raise Exception(response['error'])
