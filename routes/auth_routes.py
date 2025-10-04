@@ -41,13 +41,22 @@ def login():
             tp_hash = user.get('temp_password_hash')
             tp_exp = user.get('temp_password_expires_at')
             if tp_hash and tp_exp:
+                exp_dt = None
                 try:
-                    # Normalize ISO string: convert trailing 'Z' to '+00:00' for fromisoformat
-                    tp_exp_str = tp_exp if not (isinstance(tp_exp, str) and tp_exp.endswith('Z')) else tp_exp.replace('Z', '+00:00')
-                    exp_dt = datetime.fromisoformat(tp_exp_str)
+                    from datetime import timezone as _tz
+                    # If it's already a datetime object, use it directly
+                    if isinstance(tp_exp, datetime):
+                        exp_dt = tp_exp
+                    elif isinstance(tp_exp, (int, float)):
+                        # Epoch timestamp in seconds
+                        exp_dt = datetime.fromtimestamp(float(tp_exp), tz=_tz.utc)
+                    elif isinstance(tp_exp, str):
+                        tp_exp_str = tp_exp
+                        if tp_exp_str.endswith('Z'):
+                            tp_exp_str = tp_exp_str.replace('Z', '+00:00')
+                        exp_dt = datetime.fromisoformat(tp_exp_str)
                     # Ensure timezone-aware (attach UTC if missing)
-                    if exp_dt.tzinfo is None:
-                        from datetime import timezone as _tz
+                    if exp_dt is not None and exp_dt.tzinfo is None:
                         exp_dt = exp_dt.replace(tzinfo=_tz.utc)
                 except Exception:
                     exp_dt = None
@@ -145,11 +154,19 @@ def change_password(data):
             tp_hash = user.get('temp_password_hash')
             tp_exp = user.get('temp_password_expires_at')
             if tp_hash and tp_exp:
+                exp_dt = None
                 try:
-                    tp_exp_str = tp_exp if not (isinstance(tp_exp, str) and tp_exp.endswith('Z')) else tp_exp.replace('Z', '+00:00')
-                    exp_dt = datetime.fromisoformat(tp_exp_str)
-                    if exp_dt.tzinfo is None:
-                        from datetime import timezone as _tz
+                    from datetime import timezone as _tz
+                    if isinstance(tp_exp, datetime):
+                        exp_dt = tp_exp
+                    elif isinstance(tp_exp, (int, float)):
+                        exp_dt = datetime.fromtimestamp(float(tp_exp), tz=_tz.utc)
+                    elif isinstance(tp_exp, str):
+                        tp_exp_str = tp_exp
+                        if tp_exp_str.endswith('Z'):
+                            tp_exp_str = tp_exp_str.replace('Z', '+00:00')
+                        exp_dt = datetime.fromisoformat(tp_exp_str)
+                    if exp_dt is not None and exp_dt.tzinfo is None:
                         exp_dt = exp_dt.replace(tzinfo=_tz.utc)
                 except Exception:
                     exp_dt = None

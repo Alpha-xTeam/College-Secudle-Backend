@@ -18,6 +18,10 @@ dean_bp = Blueprint("dean", __name__)
 def cleanup_expired_announcements_logic(supabase):
     """دالة مساعدة لتنظيف الإعلانات المنتهية الصلاحية"""
     try:
+        from datetime import timezone as _tz
+        # Use timezone-aware current time for reliable comparisons
+        now_dt = datetime.now(_tz.utc)
+
         now = datetime.now().isoformat()
         
         # البحث عن الإعلانات المنتهية الصلاحية
@@ -26,8 +30,29 @@ def cleanup_expired_announcements_logic(supabase):
         # تصفية الإعلانات المنتهية يدوياً
         expired_ids = []
         for ann in expired_anns_res.data:
-            if ann.get("expires_at") and ann["expires_at"] < now:
-                expired_ids.append(ann["id"])
+            ann_exp = ann.get('expires_at')
+            if not ann_exp:
+                continue
+            try:
+                # Accept datetime objects, numeric timestamps, or ISO strings
+                if isinstance(ann_exp, datetime):
+                    exp_dt = ann_exp
+                elif isinstance(ann_exp, (int, float)):
+                    exp_dt = datetime.fromtimestamp(float(ann_exp), tz=_tz.utc)
+                elif isinstance(ann_exp, str):
+                    s = ann_exp
+                    if s.endswith('Z'):
+                        s = s.replace('Z', '+00:00')
+                    exp_dt = datetime.fromisoformat(s)
+                else:
+                    exp_dt = None
+                if exp_dt is not None and exp_dt.tzinfo is None:
+                    exp_dt = exp_dt.replace(tzinfo=_tz.utc)
+            except Exception:
+                exp_dt = None
+
+            if exp_dt is not None and exp_dt < now_dt:
+                expired_ids.append(ann['id'])
         
         # حذف الإعلانات المنتهية إذا وجدت
         if expired_ids:
