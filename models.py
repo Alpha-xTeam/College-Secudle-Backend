@@ -189,6 +189,41 @@ def get_doctor_by_name(name: str):
     response = supabase.table('doctors').select('*, departments!doctors_department_id_fkey(name)').eq('name', name).execute()
     return response.data[0] if response.data else None
 
+def get_doctor_by_code(code_value):
+    """Find a doctor by its 'doctor_code' (numeric) or 'code' (string) column.
+    Accepts numeric or string input and attempts multiple fallbacks to find a match.
+    """
+    supabase = get_supabase()
+    try:
+        # Attempt numeric match against doctor_code
+        try:
+            code_int = int(code_value)
+        except Exception:
+            code_int = None
+
+        if code_int is not None:
+            resp = supabase.table('doctors').select('*, departments!doctors_department_id_fkey(name)').eq('doctor_code', code_int).execute()
+            if resp.data:
+                return resp.data[0]
+
+        # Attempt string match against 'code' column
+        resp2 = supabase.table('doctors').select('*, departments!doctors_department_id_fkey(name)').eq('code', str(code_value)).execute()
+        if resp2.data:
+            return resp2.data[0]
+
+        # Finally attempt doctor_code as string (in case DB stored it as text)
+        resp3 = supabase.table('doctors').select('*, departments!doctors_department_id_fkey(name)').eq('doctor_code', str(code_value)).execute()
+        if resp3.data:
+            return resp3.data[0]
+
+        return None
+    except Exception:
+        try:
+            current_app.logger.exception('get_doctor_by_code failed')
+        except Exception:
+            pass
+        return None
+
 # Helper: generate unique 4-digit doctor_code
 def _generate_unique_doctor_code(supabase: Client, max_attempts: int = 20000) -> int:
     """Generate a unique 4-digit integer (1000-9999) that does not exist in doctors.doctor_code

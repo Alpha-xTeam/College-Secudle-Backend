@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from models import get_all_doctors, get_doctor_by_id, create_doctor, update_doctor, delete_doctor, get_all_departments, get_schedules_by_doctor_id
+from models import get_all_doctors, get_doctor_by_id, create_doctor, update_doctor, delete_doctor, get_all_departments, get_schedules_by_doctor_id, get_doctor_by_code
 from utils.helpers import get_user_role
 
 doctor_bp = Blueprint('doctor_bp', __name__)
@@ -122,34 +122,56 @@ def doctor_endpoint(doctor_id):
     
     return protected_doctor_endpoint()
 
-@doctor_bp.route('/<int:doctor_id>/lectures', methods=['GET', 'OPTIONS'])
-def get_doctor_lectures(doctor_id):
+@doctor_bp.route('/<int:doctor_id>', methods=['GET', 'OPTIONS'])
+def get_doctor_detail(doctor_id):
     if request.method == 'OPTIONS':
         response = jsonify()
         response.headers.add("Access-Control-Allow-Origin", "*")
         response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,apikey")
         response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
         return response
-        
-    # Require JWT for GET requests
-    from flask_jwt_extended import jwt_required, get_jwt_identity
-    @jwt_required()
-    def protected_get_doctor_lectures():
-        current_user_email = get_jwt_identity()
-        role = get_user_role(current_user_email)
-        if role not in ['admin', 'dean', 'student', 'faculty']: # Allow students and faculty to view their own lectures
-            return jsonify({"msg": "Access denied"}), 403
-        
-        # In a real app, you'd check if the requesting user is the doctor themselves
-        # or has permission to view this doctor's lectures.
-        # For simplicity, we'll allow admin/dean to view any, and others to view their own.
-        
-        lectures = get_schedules_by_doctor_id(doctor_id)
-        if lectures is None:
-            return jsonify({"error": "Doctor not found or no lectures assigned"}), 404
-        return jsonify(lectures), 200
-    
-    return protected_get_doctor_lectures()
+
+    # Public endpoint: allow fetching doctor info without JWT (used by public General page login)
+    doctor = get_doctor_by_id(doctor_id)
+    if not doctor:
+        return jsonify({"error": "Doctor not found"}), 404
+    return jsonify(doctor), 200
+
+
+@doctor_bp.route('/code/<code_value>', methods=['GET', 'OPTIONS'])
+def get_doctor_by_code_route(code_value):
+    if request.method == 'OPTIONS':
+        response = jsonify()
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,apikey")
+        response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
+        return response
+
+    doctor = get_doctor_by_code(code_value)
+    if not doctor:
+        return jsonify({"error": "Doctor not found"}), 404
+    return jsonify(doctor), 200
+
+
+@doctor_bp.route('/code/<code_value>/lectures', methods=['GET', 'OPTIONS'])
+def get_doctor_lectures_by_code(code_value):
+    if request.method == 'OPTIONS':
+        response = jsonify()
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,apikey")
+        response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
+        return response
+
+    # Public access: find doctor by code then return schedules
+    doctor = get_doctor_by_code(code_value)
+    if not doctor:
+        return jsonify({"error": "Doctor not found"}), 404
+    doctor_id = doctor.get('id')
+    lectures = get_schedules_by_doctor_id(doctor_id)
+    if lectures is None:
+        return jsonify({"error": "No lectures found or doctor not found"}), 404
+    return jsonify(lectures), 200
+
 
 @doctor_bp.route('/departments', methods=['GET', 'OPTIONS'])
 def list_departments():
