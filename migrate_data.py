@@ -1,4 +1,3 @@
-
 import sqlite3
 from supabase import create_client, Client
 import os
@@ -33,8 +32,9 @@ def migrate_table(table_name, column_names, supabase_table_name):
         if data_to_insert:
             # Supabase client uses the table name to insert data
             response = supabase.table(supabase_table_name).insert(data_to_insert).execute()
-            if response.get('error'):
-                print(f"Error migrating {table_name}: {response['error']}")
+            err = getattr(response, 'error', None)
+            if err:
+                print(f"Error migrating {table_name}: {err}")
             else:
                 print(f"Successfully migrated {len(rows)} rows to {supabase_table_name}")
         else:

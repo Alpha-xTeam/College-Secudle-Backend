@@ -155,8 +155,9 @@ def change_password(data):
         }
         response = supabase.table('users').update(update_payload).eq('username', username).execute()
 
-        if response.get('error'):
-            raise Exception(response['error'])
+        err = getattr(response, 'error', None)
+        if err:
+            raise Exception(err)
 
         return format_response(
             message='تم تغيير كلمة المرور بنجاح'
