@@ -1803,7 +1803,7 @@ def postpone_schedule(room_id, schedule_id):
                 # تحقق التداخل الفعلي مع استثناء الحالات المتتالية
                 if (
                     (new_start_time < existing_end_time and new_end_time > existing_start_time)
-                    and not (new_start_time == existing_end_time or new_end_time == start_time)
+                    and not (new_start_time == existing_end_time or new_end_time == existing_start_time)
                 ):
                     conflicts.append(existing_schedule)
         
@@ -1853,24 +1853,25 @@ def postpone_schedule(room_id, schedule_id):
         
         supabase.table("schedules").update(update_original_schedule_data).eq("id", schedule_id).execute()
 
-        # Create an announcement for the postponed lecture
-        announcement_title = f"إعلان تأجيل محاضرة: {original_schedule['subject_name']}"
-        announcement_body = (
-            f"تم تأجيل محاضرة {original_schedule['subject_name']} للمدرس {original_schedule['instructor_name']} "
-            f"التي كانت في القاعة {original_schedule['room_id']} يوم {original_schedule['day_of_week']} "
-            f"من الساعة {original_schedule['start_time']} إلى {original_schedule['end_time']}. "
-            f"الموعد الجديد: {data['postponed_date']} في القاعة {data['postponed_to_room_id']} "
-            f"من الساعة {data['postponed_start_time']} إلى {data['postponed_end_time']}. "
-            f"السبب: {data['postponed_reason']}."
-        )
+        # جلب معلومات القسمين
+        original_room_info = supabase.table("rooms").select("code", "department_id").eq("id", original_schedule['room_id']).execute()
+        new_room_info = supabase.table("rooms").select("code", "department_id").eq("id", data['postponed_to_room_id']).execute()
+        original_room_code = original_room_info.data[0]['code'] if original_room_info.data else original_schedule['room_id']
+        new_room_code = new_room_info.data[0]['code'] if new_room_info.data else data['postponed_to_room_id']
+        original_dept_id = original_room_info.data[0]['department_id'] if original_room_info.data else original_schedule.get('department_id')
+        new_dept_id = new_room_info.data[0]['department_id'] if new_room_info.data else None
 
-        # Fetch original room code for announcement
-        original_room_code_res = supabase.table("rooms").select("code").eq("id", original_schedule['room_id']).execute()
-        original_room_code = original_room_code_res.data[0]['code'] if original_room_code_res.data else original_schedule['room_id']
-
-        # Fetch new room code for announcement
-        new_room_code_res = supabase.table("rooms").select("code").eq("id", data['postponed_to_room_id']).execute()
-        new_room_code = new_room_code_res.data[0]['code'] if new_room_code_res.data else data['postponed_to_room_id']
+        # جلب اسم القسمين
+        original_dept_name = None
+        new_dept_name = None
+        if original_dept_id:
+            dept_res = supabase.table("departments").select("name").eq("id", original_dept_id).execute()
+            if dept_res.data:
+                original_dept_name = dept_res.data[0]['name']
+        if new_dept_id:
+            dept_res2 = supabase.table("departments").select("name").eq("id", new_dept_id).execute()
+            if dept_res2.data:
+                new_dept_name = dept_res2.data[0]['name']
 
         day_name_arabic_map = {
             "sunday": "الأحد",
@@ -1883,30 +1884,54 @@ def postpone_schedule(room_id, schedule_id):
         }
         arabic_day_of_week = day_name_arabic_map.get(original_schedule['day_of_week'].lower(), original_schedule['day_of_week'])
 
-        announcement_body_with_codes = (
-            f"تم تأجيل محاضرة {original_schedule['subject_name']} للمدرس {original_schedule['instructor_name']} "
-            f"التي كانت في القاعة {original_room_code} يوم {arabic_day_of_week} "
-            f"من الساعة {original_schedule['start_time']} إلى {original_schedule['end_time']}. "
-            f"الموعد الجديد: {data['postponed_date']} في القاعة {new_room_code} "
-            f"من الساعة {data['postponed_start_time']} إلى {data['postponed_end_time']}. "
-            f"السبب: {data['postponed_reason']}."
-        )
+        # تحديد هل النقل بين قسمين مختلفين أم نفس القسم
+        is_cross_department = original_dept_id != new_dept_id and new_dept_id is not None
 
-        announcement_data = {
-            "title": announcement_title,
-            "body": announcement_body_with_codes,
-            "is_global": True, # Make it global for now, or link to department_id if needed
-            "is_active": True,
-            "department_id": original_schedule.get('department_id') # Link to original schedule's department
-        }
-        
-        # Ensure department_id is fetched for original_schedule
-        if not original_schedule.get('department_id'):
-            original_room_dept_res = supabase.table("rooms").select("department_id").eq("id", original_schedule['room_id']).execute()
-            if original_room_dept_res.data:
-                announcement_data['department_id'] = original_room_dept_res.data[0]['department_id']
+        # إعلان القاعة المنقولة إليها
+        if is_cross_department:
+            title_to = f"محاضرة من قسم {original_dept_name} نقلت إلى قاعتكم"
+            body_to = (
+                f"تم نقل محاضرة {original_schedule['subject_name']} من قسم {original_dept_name} وقاعة {original_room_code} إلى قاعتكم ({new_room_code}) ليوم {data['postponed_date']} ({arabic_day_of_week}) من الساعة {data['postponed_start_time']} إلى {data['postponed_end_time']}."
+            )
+            supabase.table("announcements").insert({
+                "title": title_to,
+                "body": body_to,
+                "is_global": False,
+                "is_active": True,
+                "department_id": new_dept_id,
+                "starts_at": f"{data['postponed_date']} {data['postponed_start_time']}",
+                "expires_at": f"{data['postponed_date']} {data['postponed_end_time']}"
+            }).execute()
 
-        supabase.table("announcements").insert(announcement_data).execute()
+            # إعلان القاعة المنقولة منها
+            title_from = f"محاضرتكم نقلت إلى قسم آخر"
+            body_from = (
+                f"تم نقل محاضرة {original_schedule['subject_name']} من قاعتكم ({original_room_code}) إلى قسم {new_dept_name} وقاعة {new_room_code} ليوم {data['postponed_date']} ({arabic_day_of_week}) من الساعة {data['postponed_start_time']} إلى {data['postponed_end_time']}."
+            )
+            supabase.table("announcements").insert({
+                "title": title_from,
+                "body": body_from,
+                "is_global": False,
+                "is_active": True,
+                "department_id": original_dept_id,
+                "starts_at": f"{data['postponed_date']} {data['postponed_start_time']}",
+                "expires_at": f"{data['postponed_date']} {data['postponed_end_time']}"
+            }).execute()
+        else:
+            # إعلان موحد لنفس القسم
+            title_same = f"نقل محاضرة بين القاعات"
+            body_same = (
+                f"تم نقل محاضرة {original_schedule['subject_name']} من قاعة {original_room_code} إلى قاعة {new_room_code} ليوم {data['postponed_date']} ({arabic_day_of_week}) من الساعة {data['postponed_start_time']} إلى {data['postponed_end_time']}."
+            )
+            supabase.table("announcements").insert({
+                "title": title_same,
+                "body": body_same,
+                "is_global": False,
+                "is_active": True,
+                "department_id": original_dept_id,
+                "starts_at": f"{data['postponed_date']} {data['postponed_start_time']}",
+                "expires_at": f"{data['postponed_date']} {data['postponed_end_time']}"
+            }).execute()
 
         return format_response(
             data=new_temporary_schedule,
