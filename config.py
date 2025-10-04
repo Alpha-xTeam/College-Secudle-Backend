@@ -17,5 +17,11 @@ class Config:
     QR_CODE_FOLDER = 'static/qrcodes'
     FRONTEND_URL = 'https://www.it-college.zone.id'
     
+    # Remote API base (used for proxying external APIs that may lack CORS headers)
+    REMOTE_API_BASE = os.environ.get('REMOTE_API_BASE') or 'https://hsabadi.pythonanywhere.com/api'
+    
+    # CORS configuration: comma-separated allowed origins
+    CORS_ORIGINS = os.environ.get('CORS_ORIGINS') or f"{FRONTEND_URL},http://localhost:3000"
+    
     # File Upload Configuration
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
