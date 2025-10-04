@@ -8,6 +8,7 @@ from models import (
     get_schedules_by_room_id,
     get_all_announcements,
     get_recent_general_student_usages,
+    check_password,
 )
 from utils.helpers import validate_json_data, format_response, admin_required, user_management_required
 from datetime import datetime, timedelta, timezone
@@ -759,3 +760,84 @@ def generate_temp_password(user_id):
         import traceback
         traceback.print_exc()
         return format_response(message=f'حدث خطأ أثناء توليد كلمة مؤقتة: {str(e)}', success=False, status_code=500)
+
+
+@dean_bp.route('/users/<int:user_id>/debug_temp', methods=['POST'])
+@user_management_required
+def debug_temp_password(user_id):
+    """Debug endpoint for inspecting a user's temp password state.
+    Request JSON may include { "temp_password": "..." } to validate the provided temp password.
+    Returns safe diagnostics: whether a temp password exists, its expiry (as stored), whether expired,
+    and whether the provided temp matches the stored hash. Does NOT return the hash itself.
+    """
+    try:
+        supabase = current_app.supabase
+        user_res = supabase.table('users').select('id, username, email, temp_password_hash, temp_password_expires_at').eq('id', user_id).execute()
+        if not user_res.data:
+            return format_response(data=None, message='المستخدم غير موجود', success=False, status_code=404)
+
+        u = user_res.data[0]
+        tp_hash = u.get('temp_password_hash')
+        tp_exp = u.get('temp_password_expires_at')
+
+        # Determine expiry parsing robustly
+        from datetime import datetime, timezone as _tz
+        exp_dt = None
+        try:
+            if isinstance(tp_exp, datetime):
+                exp_dt = tp_exp
+            elif isinstance(tp_exp, (int, float)):
+                exp_dt = datetime.fromtimestamp(float(tp_exp), tz=_tz.utc)
+            elif isinstance(tp_exp, str):
+                s = tp_exp
+                if s.endswith('Z'):
+                    s = s.replace('Z', '+00:00')
+                exp_dt = datetime.fromisoformat(s)
+            if exp_dt is not None and exp_dt.tzinfo is None:
+                exp_dt = exp_dt.replace(tzinfo=_tz.utc)
+        except Exception:
+            exp_dt = None
+
+        now = datetime.now(_tz.utc)
+        temp_exists = bool(tp_hash)
+        expired = None
+        if exp_dt is None:
+            expired = None
+        else:
+            expired = exp_dt < now
+
+        matches = None
+        payload = {}
+        # If client provided a temp_password, validate it
+        req = request.get_json(silent=True) or {}
+        provided = req.get('temp_password')
+        if provided is not None:
+            if not tp_hash:
+                matches = False
+            else:
+                try:
+                    matches = check_password(tp_hash, provided)
+                except Exception:
+                    matches = False
+
+        payload = {
+            'user_id': u.get('id'),
+            'username': u.get('username'),
+            'email': u.get('email'),
+            'temp_exists': temp_exists,
+            'temp_expires_at_raw': tp_exp,
+            'temp_expires_at_parsed': exp_dt.isoformat() if exp_dt is not None else None,
+            'temp_expired': expired,
+            'temp_matches_provided': matches
+         }
+
+         # Log a safe diagnostic
+        try:
+            current_app.logger.info(f"debug_temp: user={u.get('username')}, temp_exists={temp_exists}, expired={expired}, matches={bool(matches)}")
+        except Exception:
+            pass
+
+        return format_response(data=payload, message='تشخيص كلمة المرور المؤقتة')
+    except Exception as e:
+        current_app.logger.exception('debug_temp_password failed')
+        return format_response(data=None, message=f'حدث خطأ: {str(e)}', success=False, status_code=500)
