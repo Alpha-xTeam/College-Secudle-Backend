@@ -197,3 +197,32 @@ def list_departments():
     
     departments = get_all_departments()
     return jsonify(departments), 200
+
+@doctor_bp.route('/<int:doctor_id>/lectures', methods=['GET', 'OPTIONS'])
+def get_doctor_lectures_by_id(doctor_id):
+    if request.method == 'OPTIONS':
+        response = jsonify()
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,apikey")
+        response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
+        return response
+
+    # Public access: find doctor by id then return schedules
+    doctor = get_doctor_by_id(doctor_id)
+    if not doctor:
+        return jsonify({"error": "Doctor not found"}), 404
+
+    include_assistants = str(request.args.get('include_assistants', 'false')).lower() in ('1', 'true', 'yes')
+    lectures = get_schedules_by_doctor_id(doctor_id)
+    # Return the (possibly empty) list of lectures. Treat None as server error.
+    if lectures is None:
+        return jsonify({"error": "Internal server error"}), 500
+
+    if not include_assistants:
+        # Remove assistant/junction details to reduce payload if not requested
+        for lec in lectures:
+            lec.pop('schedule_doctors', None)
+            lec.pop('assistants', None)
+            lec.pop('primary_doctor_name', None)
+
+    return jsonify(lectures), 200
