@@ -1873,6 +1873,8 @@ def postpone_schedule(room_id, schedule_id):
             "lecture_type_display": lecture_type_display,
             "original_room": {"id": original_schedule.get('room_id'), "code": original_room_code},
             "new_room": {"id": data['postponed_to_room_id'], "code": new_room_code},
+            "original_department": {"id": original_dept_id, "name": original_dept_name},
+            "new_department": {"id": new_dept_id, "name": new_dept_name},
             "postponed_date": data['postponed_date'],
             "postponed_start_time": data['postponed_start_time'],
             "postponed_end_time": data['postponed_end_time'],
@@ -1935,8 +1937,14 @@ def postpone_schedule(room_id, schedule_id):
         # إعلان للقاعة المنقولة إليها
         dest_dept_for_ann = new_dept_id or original_dept_id
         body_to = (
-            f"تم تأجيل محاضرة '{original_schedule.get('subject_name')}' ووضعها مؤقتًا في قاعتكم ({new_room_code}) ليوم {data['postponed_date']} ({arabic_day_of_week}) من الساعة {data['postponed_start_time']} إلى {data['postponed_end_time']}."
+            f"تم تأجيل محاضرة '{original_schedule.get('subject_name')}' من القاعة ({original_room_code})"
         )
+        if original_dept_name and new_dept_name and original_dept_name != new_dept_name:
+            body_to += f" في قسم {original_dept_name}"
+        body_to += f" ووضعها مؤقتًا في قاعتكم ({new_room_code})"
+        if original_dept_name and new_dept_name and original_dept_name != new_dept_name:
+            body_to += f" في قسم {new_dept_name}"
+        body_to += f" ليوم {data['postponed_date']} ({arabic_day_of_week}) من الساعة {data['postponed_start_time']} إلى {data['postponed_end_time']}."
         if primary_instructor:
             body_to += f" المحاضر: {primary_instructor}."
         if instructors and len(instructors) > 1:
@@ -1961,8 +1969,14 @@ def postpone_schedule(room_id, schedule_id):
         # إعلان للقاعة المنقولة منها
         from_dept_for_ann = original_dept_id
         body_from = (
-            f"تأجلت محاضرتكم '{original_schedule.get('subject_name')}' من قاعتكم ({original_room_code}) وتم وضعها مؤقتًا في القاعة ({new_room_code}) ليوم {data['postponed_date']} ({arabic_day_of_week}) من الساعة {data['postponed_start_time']} إلى {data['postponed_end_time']}."
+            f"تأجلت محاضرتكم '{original_schedule.get('subject_name')}' من قاعتكم ({original_room_code})"
         )
+        if original_dept_name and new_dept_name and original_dept_name != new_dept_name:
+            body_from += f" في قسم {original_dept_name}"
+        body_from += f" وتم وضعها مؤقتًا في القاعة ({new_room_code})"
+        if original_dept_name and new_dept_name and original_dept_name != new_dept_name:
+            body_from += f" في قسم {new_dept_name}"
+        body_from += f" ليوم {data['postponed_date']} ({arabic_day_of_week}) من الساعة {data['postponed_start_time']} إلى {data['postponed_end_time']}."
         if primary_instructor:
             body_from += f" المحاضر: {primary_instructor}."
         if instructors and len(instructors) > 1:
