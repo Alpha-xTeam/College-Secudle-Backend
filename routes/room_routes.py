@@ -1936,26 +1936,31 @@ def postpone_schedule(room_id, schedule_id):
         # إنشاء إعلانين دائماً: واحد للقاعة المنقولة إليها وآخر للقاعة المنقولة منها
         # إعلان للقاعة المنقولة إليها
         dest_dept_for_ann = new_dept_id or original_dept_id
-        body_to = f"""تم تأجيل محاضرة مؤقتاً إلى قاعتكم.
-
-المادة: {original_schedule.get('subject_name')}
-المحاضر: {primary_instructor or 'غير محدد'}
-نوع المحاضرة: {lecture_type_display}
-القاعة الأصلية: {original_room_code}"""
+        
+        body_to_lines = ["تم تأجيل محاضرة مؤقتاً إلى قاعتكم:", ""]
+        body_to_lines.append(f"📚 المادة: {original_schedule.get('subject_name')}")
+        body_to_lines.append(f"👨‍🏫 المحاضر: {primary_instructor or 'غير محدد'}")
+        body_to_lines.append(f"📖 نوع المحاضرة: {lecture_type_display}")
+        body_to_lines.append("")
+        body_to_lines.append(f"🏫 القاعة الأصلية: {original_room_code}")
         if original_dept_name and new_dept_name and original_dept_name != new_dept_name:
-            body_to += f"\nالقسم الأصلي: {original_dept_name}"
-        body_to += f"""
-القاعة الجديدة: {new_room_code}"""
+            body_to_lines.append(f"🏢 القسم الأصلي: {original_dept_name}")
+        
+        body_to_lines.append(f"🏫 القاعة الجديدة: {new_room_code}")
         if original_dept_name and new_dept_name and original_dept_name != new_dept_name:
-            body_to += f"\nالقسم الجديد: {new_dept_name}"
-        body_to += f"""
-التاريخ: {data['postponed_date']} ({arabic_day_of_week})
-الوقت: من {data['postponed_start_time']} إلى {data['postponed_end_time']}
-السبب: {data.get('postponed_reason')}"""
+            body_to_lines.append(f"🏢 القسم الجديد: {new_dept_name}")
+        
+        body_to_lines.append("")
+        body_to_lines.append(f"📅 التاريخ: {data['postponed_date']} ({arabic_day_of_week})")
+        body_to_lines.append(f"⏰ الوقت: من {data['postponed_start_time']} إلى {data['postponed_end_time']}")
+        body_to_lines.append(f"📝 السبب: {data.get('postponed_reason')}")
+        
         if instructors and len(instructors) > 1:
             assistants = [n for n in instructors if n != primary_instructor]
             if assistants:
-                body_to += f"\nالمساعدون: {', '.join(assistants)}"
+                body_to_lines.append(f"👥 المساعدون: {', '.join(assistants)}")
+        
+        body_to = "\n".join(body_to_lines)
 
         supabase.table("announcements").insert({
             "title": announcement_title,
@@ -1970,26 +1975,31 @@ def postpone_schedule(room_id, schedule_id):
 
         # إعلان للقاعة المنقولة منها
         from_dept_for_ann = original_dept_id
-        body_from = f"""تأجلت محاضرتكم مؤقتاً إلى قاعة أخرى.
-
-المادة: {original_schedule.get('subject_name')}
-المحاضر: {primary_instructor or 'غير محدد'}
-نوع المحاضرة: {lecture_type_display}
-القاعة الأصلية: {original_room_code}"""
+        
+        body_from_lines = ["تأجلت محاضرتكم مؤقتاً إلى قاعة أخرى:", ""]
+        body_from_lines.append(f"📚 المادة: {original_schedule.get('subject_name')}")
+        body_from_lines.append(f"👨‍🏫 المحاضر: {primary_instructor or 'غير محدد'}")
+        body_from_lines.append(f"📖 نوع المحاضرة: {lecture_type_display}")
+        body_from_lines.append("")
+        body_from_lines.append(f"🏫 القاعة الأصلية: {original_room_code}")
         if original_dept_name and new_dept_name and original_dept_name != new_dept_name:
-            body_from += f"\nالقسم الأصلي: {original_dept_name}"
-        body_from += f"""
-القاعة الجديدة: {new_room_code}"""
+            body_from_lines.append(f"🏢 القسم الأصلي: {original_dept_name}")
+        
+        body_from_lines.append(f"🏫 القاعة الجديدة: {new_room_code}")
         if original_dept_name and new_dept_name and original_dept_name != new_dept_name:
-            body_from += f"\nالقسم الجديد: {new_dept_name}"
-        body_from += f"""
-التاريخ: {data['postponed_date']} ({arabic_day_of_week})
-الوقت: من {data['postponed_start_time']} إلى {data['postponed_end_time']}
-السبب: {data.get('postponed_reason')}"""
+            body_from_lines.append(f"🏢 القسم الجديد: {new_dept_name}")
+        
+        body_from_lines.append("")
+        body_from_lines.append(f"📅 التاريخ: {data['postponed_date']} ({arabic_day_of_week})")
+        body_from_lines.append(f"⏰ الوقت: من {data['postponed_start_time']} إلى {data['postponed_end_time']}")
+        body_from_lines.append(f"📝 السبب: {data.get('postponed_reason')}")
+        
         if instructors and len(instructors) > 1:
             assistants = [n for n in instructors if n != primary_instructor]
             if assistants:
-                body_from += f"\nالمساعدون: {', '.join(assistants)}"
+                body_from_lines.append(f"👥 المساعدون: {', '.join(assistants)}")
+        
+        body_from = "\n".join(body_from_lines)
 
         supabase.table("announcements").insert({
             "title": announcement_title,
