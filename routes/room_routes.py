@@ -1936,24 +1936,26 @@ def postpone_schedule(room_id, schedule_id):
         # إنشاء إعلانين دائماً: واحد للقاعة المنقولة إليها وآخر للقاعة المنقولة منها
         # إعلان للقاعة المنقولة إليها
         dest_dept_for_ann = new_dept_id or original_dept_id
-        body_to = (
-            f"تم تأجيل محاضرة '{original_schedule.get('subject_name')}' من القاعة ({original_room_code})"
-        )
+        body_to = f"""تم تأجيل محاضرة مؤقتاً إلى قاعتكم.
+
+المادة: {original_schedule.get('subject_name')}
+المحاضر: {primary_instructor or 'غير محدد'}
+نوع المحاضرة: {lecture_type_display}
+القاعة الأصلية: {original_room_code}"""
         if original_dept_name and new_dept_name and original_dept_name != new_dept_name:
-            body_to += f" في قسم {original_dept_name}"
-        body_to += f" ووضعها مؤقتًا في قاعتكم ({new_room_code})"
+            body_to += f"\nالقسم الأصلي: {original_dept_name}"
+        body_to += f"""
+القاعة الجديدة: {new_room_code}"""
         if original_dept_name and new_dept_name and original_dept_name != new_dept_name:
-            body_to += f" في قسم {new_dept_name}"
-        body_to += f" ليوم {data['postponed_date']} ({arabic_day_of_week}) من الساعة {data['postponed_start_time']} إلى {data['postponed_end_time']}."
-        if primary_instructor:
-            body_to += f" المحاضر: {primary_instructor}."
+            body_to += f"\nالقسم الجديد: {new_dept_name}"
+        body_to += f"""
+التاريخ: {data['postponed_date']} ({arabic_day_of_week})
+الوقت: من {data['postponed_start_time']} إلى {data['postponed_end_time']}
+السبب: {data.get('postponed_reason')}"""
         if instructors and len(instructors) > 1:
             assistants = [n for n in instructors if n != primary_instructor]
             if assistants:
-                body_to += f" مساعدون: {', '.join(assistants)}."
-        if lecture_type_display:
-            body_to += f" نوع المحاضرة: {lecture_type_display}."
-        body_to += f" السبب: {data.get('postponed_reason')}."
+                body_to += f"\nالمساعدون: {', '.join(assistants)}"
 
         supabase.table("announcements").insert({
             "title": announcement_title,
@@ -1968,24 +1970,26 @@ def postpone_schedule(room_id, schedule_id):
 
         # إعلان للقاعة المنقولة منها
         from_dept_for_ann = original_dept_id
-        body_from = (
-            f"تأجلت محاضرتكم '{original_schedule.get('subject_name')}' من قاعتكم ({original_room_code})"
-        )
+        body_from = f"""تأجلت محاضرتكم مؤقتاً إلى قاعة أخرى.
+
+المادة: {original_schedule.get('subject_name')}
+المحاضر: {primary_instructor or 'غير محدد'}
+نوع المحاضرة: {lecture_type_display}
+القاعة الأصلية: {original_room_code}"""
         if original_dept_name and new_dept_name and original_dept_name != new_dept_name:
-            body_from += f" في قسم {original_dept_name}"
-        body_from += f" وتم وضعها مؤقتًا في القاعة ({new_room_code})"
+            body_from += f"\nالقسم الأصلي: {original_dept_name}"
+        body_from += f"""
+القاعة الجديدة: {new_room_code}"""
         if original_dept_name and new_dept_name and original_dept_name != new_dept_name:
-            body_from += f" في قسم {new_dept_name}"
-        body_from += f" ليوم {data['postponed_date']} ({arabic_day_of_week}) من الساعة {data['postponed_start_time']} إلى {data['postponed_end_time']}."
-        if primary_instructor:
-            body_from += f" المحاضر: {primary_instructor}."
+            body_from += f"\nالقسم الجديد: {new_dept_name}"
+        body_from += f"""
+التاريخ: {data['postponed_date']} ({arabic_day_of_week})
+الوقت: من {data['postponed_start_time']} إلى {data['postponed_end_time']}
+السبب: {data.get('postponed_reason')}"""
         if instructors and len(instructors) > 1:
             assistants = [n for n in instructors if n != primary_instructor]
             if assistants:
-                body_from += f" مساعدون: {', '.join(assistants)}."
-        if lecture_type_display:
-            body_from += f" نوع المحاضرة: {lecture_type_display}."
-        body_from += f" السبب: {data.get('postponed_reason')}."
+                body_from += f"\nالمساعدون: {', '.join(assistants)}"
 
         supabase.table("announcements").insert({
             "title": announcement_title,
