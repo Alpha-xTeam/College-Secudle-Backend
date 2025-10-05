@@ -1815,6 +1815,37 @@ def postpone_schedule(room_id, schedule_id):
                 data=conflicts[0]
             )
 
+        # جلب معلومات القسمين
+        original_room_info = supabase.table("rooms").select("code", "department_id").eq("id", original_schedule['room_id']).execute()
+        new_room_info = supabase.table("rooms").select("code", "department_id").eq("id", data['postponed_to_room_id']).execute()
+        original_room_code = original_room_info.data[0]['code'] if original_room_info.data else original_schedule['room_id']
+        new_room_code = new_room_info.data[0]['code'] if new_room_info.data else data['postponed_to_room_id']
+        original_dept_id = original_room_info.data[0]['department_id'] if original_room_info.data else original_schedule.get('department_id')
+        new_dept_id = new_room_info.data[0]['department_id'] if new_room_info.data else None
+
+        # جلب اسم القسمين
+        original_dept_name = None
+        new_dept_name = None
+        if original_dept_id:
+            dept_res = supabase.table("departments").select("name").eq("id", original_dept_id).execute()
+            if dept_res.data:
+                original_dept_name = dept_res.data[0]['name']
+        if new_dept_id:
+            dept_res2 = supabase.table("departments").select("name").eq("id", new_dept_id).execute()
+            if dept_res2.data:
+                new_dept_name = dept_res2.data[0]['name']
+
+        day_name_arabic_map = {
+            "sunday": "الأحد",
+            "monday": "الاثنين",
+            "tuesday": "الثلاثاء",
+            "wednesday": "الأربعاء",
+            "thursday": "الخميس",
+            "friday": "الجمعة",
+            "saturday": "السبت"
+        }
+        arabic_day_of_week = day_name_arabic_map.get(original_schedule['day_of_week'].lower(), original_schedule['day_of_week'])
+
         # جمع معلومات المحاضرين وتحضير بيانات الإعلان
         from models import get_schedule_doctors
         schedule_doctors = get_schedule_doctors(original_schedule['id']) if original_schedule.get('id') else []
@@ -1896,37 +1927,6 @@ def postpone_schedule(room_id, schedule_id):
         }
         
         supabase.table("schedules").update(update_original_schedule_data).eq("id", schedule_id).execute()
-
-        # جلب معلومات القسمين
-        original_room_info = supabase.table("rooms").select("code", "department_id").eq("id", original_schedule['room_id']).execute()
-        new_room_info = supabase.table("rooms").select("code", "department_id").eq("id", data['postponed_to_room_id']).execute()
-        original_room_code = original_room_info.data[0]['code'] if original_room_info.data else original_schedule['room_id']
-        new_room_code = new_room_info.data[0]['code'] if new_room_info.data else data['postponed_to_room_id']
-        original_dept_id = original_room_info.data[0]['department_id'] if original_room_info.data else original_schedule.get('department_id')
-        new_dept_id = new_room_info.data[0]['department_id'] if new_room_info.data else None
-
-        # جلب اسم القسمين
-        original_dept_name = None
-        new_dept_name = None
-        if original_dept_id:
-            dept_res = supabase.table("departments").select("name").eq("id", original_dept_id).execute()
-            if dept_res.data:
-                original_dept_name = dept_res.data[0]['name']
-        if new_dept_id:
-            dept_res2 = supabase.table("departments").select("name").eq("id", new_dept_id).execute()
-            if dept_res2.data:
-                new_dept_name = dept_res2.data[0]['name']
-
-        day_name_arabic_map = {
-            "sunday": "الأحد",
-            "monday": "الاثنين",
-            "tuesday": "الثلاثاء",
-            "wednesday": "الأربعاء",
-            "thursday": "الخميس",
-            "friday": "الجمعة",
-            "saturday": "السبت"
-        }
-        arabic_day_of_week = day_name_arabic_map.get(original_schedule['day_of_week'].lower(), original_schedule['day_of_week'])
 
         # تحديد هل النقل بين قسمين مختلفين أم نفس القسم
         is_cross_department = original_dept_id != new_dept_id and new_dept_id is not None
