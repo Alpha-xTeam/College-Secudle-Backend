@@ -1815,6 +1815,41 @@ def postpone_schedule(room_id, schedule_id):
                 data=conflicts[0]
             )
 
+        # جمع معلومات المحاضرين وتحضير بيانات الإعلان
+        from models import get_schedule_doctors
+        schedule_doctors = get_schedule_doctors(original_schedule['id']) if original_schedule.get('id') else []
+        instructors = []
+        primary_instructor = original_schedule.get('instructor_name')
+        if schedule_doctors:
+            for sd in schedule_doctors:
+                name = sd.get('doctors', {}).get('name') or sd.get('doctors', {}).get('full_name')
+                if name:
+                    instructors.append(name)
+                    if sd.get('is_primary'):
+                        primary_instructor = name
+
+        lecture_type = original_schedule.get('lecture_type', '')
+        lecture_type_display = 'نظري' if lecture_type == 'theoretical' else ('عملي' if lecture_type == 'practical' else lecture_type)
+
+        announcement_title = f"تأجيل - {original_schedule.get('subject_name', 'محاضرة')}"
+
+        ann_meta = {
+            "type": "postponement",
+            "subject_name": original_schedule.get('subject_name'),
+            "instructors": instructors or [original_schedule.get('instructor_name')],
+            "primary_instructor": primary_instructor,
+            "lecture_type": lecture_type,
+            "lecture_type_display": lecture_type_display,
+            "original_room": {"id": original_schedule.get('room_id'), "code": original_room_code},
+            "new_room": {"id": data['postponed_to_room_id'], "code": new_room_code},
+            "postponed_date": data['postponed_date'],
+            "postponed_start_time": data['postponed_start_time'],
+            "postponed_end_time": data['postponed_end_time'],
+            "postponed_reason": data['postponed_reason'],
+            "original_schedule_id": original_schedule.get('id'),
+            "moved_by": username,
+        }
+
         # Create a new temporary schedule entry in the target room
         new_temporary_schedule_data = {
             "room_id": data["postponed_to_room_id"],
@@ -1892,41 +1927,6 @@ def postpone_schedule(room_id, schedule_id):
             "saturday": "السبت"
         }
         arabic_day_of_week = day_name_arabic_map.get(original_schedule['day_of_week'].lower(), original_schedule['day_of_week'])
-
-        # جمع معلومات المحاضرين وتحضير بيانات الإعلان
-        from models import get_schedule_doctors
-        schedule_doctors = get_schedule_doctors(original_schedule['id']) if original_schedule.get('id') else []
-        instructors = []
-        primary_instructor = original_schedule.get('instructor_name')
-        if schedule_doctors:
-            for sd in schedule_doctors:
-                name = sd.get('doctors', {}).get('name') or sd.get('doctors', {}).get('full_name')
-                if name:
-                    instructors.append(name)
-                    if sd.get('is_primary'):
-                        primary_instructor = name
-
-        lecture_type = original_schedule.get('lecture_type', '')
-        lecture_type_display = 'نظري' if lecture_type == 'theoretical' else ('عملي' if lecture_type == 'practical' else lecture_type)
-
-        announcement_title = f"تأجيل - {original_schedule.get('subject_name', 'محاضرة')}"
-
-        ann_meta = {
-            "type": "postponement",
-            "subject_name": original_schedule.get('subject_name'),
-            "instructors": instructors or [original_schedule.get('instructor_name')],
-            "primary_instructor": primary_instructor,
-            "lecture_type": lecture_type,
-            "lecture_type_display": lecture_type_display,
-            "original_room": {"id": original_schedule.get('room_id'), "code": original_room_code},
-            "new_room": {"id": data['postponed_to_room_id'], "code": new_room_code},
-            "postponed_date": data['postponed_date'],
-            "postponed_start_time": data['postponed_start_time'],
-            "postponed_end_time": data['postponed_end_time'],
-            "postponed_reason": data['postponed_reason'],
-            "original_schedule_id": original_schedule.get('id'),
-            "moved_by": username,
-        }
 
         # تحديد هل النقل بين قسمين مختلفين أم نفس القسم
         is_cross_department = original_dept_id != new_dept_id and new_dept_id is not None
