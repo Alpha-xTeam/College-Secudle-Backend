@@ -1839,6 +1839,15 @@ def postpone_schedule(room_id, schedule_id):
         new_temporary_schedule_res = supabase.table("schedules").insert(new_temporary_schedule_data).execute()
         new_temporary_schedule = new_temporary_schedule_res.data[0]
 
+        # نسخ بيانات المحاضرين إلى الجدول المؤقت الجديد
+        if schedule_doctors:
+            for sd in schedule_doctors:
+                supabase.table("schedule_doctors").insert({
+                    "schedule_id": new_temporary_schedule["id"],
+                    "doctor_id": sd["doctor_id"],
+                    "is_primary": sd["is_primary"]
+                }).execute()
+
         # Update the original schedule to mark it as moved out and link to the new temporary schedule
         update_original_schedule_data = {
             "is_moved_out": True,
@@ -1884,54 +1893,96 @@ def postpone_schedule(room_id, schedule_id):
         }
         arabic_day_of_week = day_name_arabic_map.get(original_schedule['day_of_week'].lower(), original_schedule['day_of_week'])
 
+        # جمع معلومات المحاضرين وتحضير بيانات الإعلان
+        from models import get_schedule_doctors
+        schedule_doctors = get_schedule_doctors(original_schedule['id']) if original_schedule.get('id') else []
+        instructors = []
+        primary_instructor = original_schedule.get('instructor_name')
+        if schedule_doctors:
+            for sd in schedule_doctors:
+                name = sd.get('doctors', {}).get('name') or sd.get('doctors', {}).get('full_name')
+                if name:
+                    instructors.append(name)
+                    if sd.get('is_primary'):
+                        primary_instructor = name
+
+        lecture_type = original_schedule.get('lecture_type', '')
+        lecture_type_display = 'نظري' if lecture_type == 'theoretical' else ('عملي' if lecture_type == 'practical' else lecture_type)
+
+        announcement_title = f"تأجيل - {original_schedule.get('subject_name', 'محاضرة')}"
+
+        ann_meta = {
+            "type": "postponement",
+            "subject_name": original_schedule.get('subject_name'),
+            "instructors": instructors or [original_schedule.get('instructor_name')],
+            "primary_instructor": primary_instructor,
+            "lecture_type": lecture_type,
+            "lecture_type_display": lecture_type_display,
+            "original_room": {"id": original_schedule.get('room_id'), "code": original_room_code},
+            "new_room": {"id": data['postponed_to_room_id'], "code": new_room_code},
+            "postponed_date": data['postponed_date'],
+            "postponed_start_time": data['postponed_start_time'],
+            "postponed_end_time": data['postponed_end_time'],
+            "postponed_reason": data['postponed_reason'],
+            "original_schedule_id": original_schedule.get('id'),
+            "moved_by": username,
+        }
+
         # تحديد هل النقل بين قسمين مختلفين أم نفس القسم
         is_cross_department = original_dept_id != new_dept_id and new_dept_id is not None
 
-        # إعلان القاعة المنقولة إليها
-        if is_cross_department:
-            title_to = f"محاضرة من قسم {original_dept_name} نقلت إلى قاعتكم"
-            body_to = (
-                f"تم نقل محاضرة {original_schedule['subject_name']} من قسم {original_dept_name} وقاعة {original_room_code} إلى قاعتكم ({new_room_code}) ليوم {data['postponed_date']} ({arabic_day_of_week}) من الساعة {data['postponed_start_time']} إلى {data['postponed_end_time']}."
-            )
-            supabase.table("announcements").insert({
-                "title": title_to,
-                "body": body_to,
-                "is_global": False,
-                "is_active": True,
-                "department_id": new_dept_id,
-                "starts_at": f"{data['postponed_date']} {data['postponed_start_time']}",
-                "expires_at": f"{data['postponed_date']} {data['postponed_end_time']}"
-            }).execute()
+        # إنشاء إعلانين دائماً: واحد للقاعة المنقولة إليها وآخر للقاعة المنقولة منها
+        # إعلان للقاعة المنقولة إليها
+        dest_dept_for_ann = new_dept_id or original_dept_id
+        body_to = (
+            f"تم تأجيل محاضرة '{original_schedule.get('subject_name')}' ووضعها مؤقتًا في قاعتكم ({new_room_code}) ليوم {data['postponed_date']} ({arabic_day_of_week}) من الساعة {data['postponed_start_time']} إلى {data['postponed_end_time']}."
+        )
+        if primary_instructor:
+            body_to += f" المحاضر: {primary_instructor}."
+        if instructors and len(instructors) > 1:
+            assistants = [n for n in instructors if n != primary_instructor]
+            if assistants:
+                body_to += f" مساعدون: {', '.join(assistants)}."
+        if lecture_type_display:
+            body_to += f" نوع المحاضرة: {lecture_type_display}."
+        body_to += f" السبب: {data.get('postponed_reason')}."
 
-            # إعلان القاعة المنقولة منها
-            title_from = f"محاضرتكم نقلت إلى قسم آخر"
-            body_from = (
-                f"تم نقل محاضرة {original_schedule['subject_name']} من قاعتكم ({original_room_code}) إلى قسم {new_dept_name} وقاعة {new_room_code} ليوم {data['postponed_date']} ({arabic_day_of_week}) من الساعة {data['postponed_start_time']} إلى {data['postponed_end_time']}."
-            )
-            supabase.table("announcements").insert({
-                "title": title_from,
-                "body": body_from,
-                "is_global": False,
-                "is_active": True,
-                "department_id": original_dept_id,
-                "starts_at": f"{data['postponed_date']} {data['postponed_start_time']}",
-                "expires_at": f"{data['postponed_date']} {data['postponed_end_time']}"
-            }).execute()
-        else:
-            # إعلان موحد لنفس القسم
-            title_same = f"نقل محاضرة بين القاعات"
-            body_same = (
-                f"تم نقل محاضرة {original_schedule['subject_name']} من قاعة {original_room_code} إلى قاعة {new_room_code} ليوم {data['postponed_date']} ({arabic_day_of_week}) من الساعة {data['postponed_start_time']} إلى {data['postponed_end_time']}."
-            )
-            supabase.table("announcements").insert({
-                "title": title_same,
-                "body": body_same,
-                "is_global": False,
-                "is_active": True,
-                "department_id": original_dept_id,
-                "starts_at": f"{data['postponed_date']} {data['postponed_start_time']}",
-                "expires_at": f"{data['postponed_date']} {data['postponed_end_time']}"
-            }).execute()
+        supabase.table("announcements").insert({
+            "title": announcement_title,
+            "body": body_to,
+            "is_global": False,
+            "is_active": True,
+            "department_id": dest_dept_for_ann,
+            "starts_at": f"{data['postponed_date']} {data['postponed_start_time']}",
+            "expires_at": f"{data['postponed_date']} {data['postponed_end_time']}",
+            "meta": ann_meta,
+        }).execute()
+
+        # إعلان للقاعة المنقولة منها
+        from_dept_for_ann = original_dept_id
+        body_from = (
+            f"تأجلت محاضرتكم '{original_schedule.get('subject_name')}' من قاعتكم ({original_room_code}) وتم وضعها مؤقتًا في القاعة ({new_room_code}) ليوم {data['postponed_date']} ({arabic_day_of_week}) من الساعة {data['postponed_start_time']} إلى {data['postponed_end_time']}."
+        )
+        if primary_instructor:
+            body_from += f" المحاضر: {primary_instructor}."
+        if instructors and len(instructors) > 1:
+            assistants = [n for n in instructors if n != primary_instructor]
+            if assistants:
+                body_from += f" مساعدون: {', '.join(assistants)}."
+        if lecture_type_display:
+            body_from += f" نوع المحاضرة: {lecture_type_display}."
+        body_from += f" السبب: {data.get('postponed_reason')}."
+
+        supabase.table("announcements").insert({
+            "title": announcement_title,
+            "body": body_from,
+            "is_global": False,
+            "is_active": True,
+            "department_id": from_dept_for_ann,
+            "starts_at": f"{data['postponed_date']} {data['postponed_start_time']}",
+            "expires_at": f"{data['postponed_date']} {data['postponed_end_time']}",
+            "meta": ann_meta,
+        }).execute()
 
         return format_response(
             data=new_temporary_schedule,
