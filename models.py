@@ -28,6 +28,21 @@ def create_user(data: dict):
     response = supabase.table('users').insert(data).execute()
     return response.data[0] if response.data else None
 
+def get_all_users():
+    supabase = get_supabase()
+    response = supabase.table('users').select('*').execute()
+    return response.data
+
+def update_user(user_id: int, data: dict):
+    supabase = get_supabase()
+    response = supabase.table('users').update(data).eq('id', user_id).execute()
+    return response.data[0] if response.data else None
+
+def delete_user(user_id: int):
+    supabase = get_supabase()
+    response = supabase.table('users').delete().eq('id', user_id).execute()
+    return response.data
+
 def check_password(password_hash: str, password: str) -> bool:
     try:
         return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))

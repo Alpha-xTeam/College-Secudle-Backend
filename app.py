@@ -10,6 +10,7 @@ from routes.public_routes import public_bp
 from routes.admin_routes import admin_bp
 from routes.student_routes import student_bp
 from routes.doctor_routes import doctor_bp # New import
+from routes.owner_routes import owner_bp
 import os
 from flask_cors import CORS
 
@@ -53,6 +54,7 @@ def create_app():
     app.register_blueprint(admin_bp, url_prefix='/api/admin')
     app.register_blueprint(student_bp, url_prefix='/api/students')
     app.register_blueprint(doctor_bp, url_prefix='/api/doctors') # New blueprint registration
+    app.register_blueprint(owner_bp, url_prefix='/api/owner')
     
     # Global OPTIONS handler for preflight requests
     @app.before_request

@@ -15,8 +15,8 @@ def admin_required(f):
             # البحث عن المستخدم في قاعدة البيانات
             user = get_user_by_username(username)
             role = user.get('role') if user else None
-            if not user or role not in ['dean', 'department_head']:
-                return format_response(data=None, message='مطلوب صلاحيات العميد', success=False, status_code=403)
+            if not user or role not in ['owner', 'dean', 'department_head']:
+                return format_response(data=None, message='مطلوب صلاحيات العميد أو أعلى', success=False, status_code=403)
             
             return f(*args, **kwargs)
             
@@ -40,7 +40,7 @@ def user_management_required(f):
             # البحث عن المستخدم في قاعدة البيانات
             user = get_user_by_username(username)
             role = user.get('role') if user else None
-            if not user or role not in ['dean', 'department_head', 'supervisor']:
+            if not user or role not in ['owner', 'dean', 'department_head', 'supervisor']:
                 return format_response(data=None, message='مطلوب صلاحيات إدارة المستخدمين', success=False, status_code=403)
             
             return f(*args, **kwargs)
@@ -68,13 +68,38 @@ def department_access_required(f):
                 return format_response(data=None, message='المستخدم غير موجود', success=False, status_code=404)
             
             role = user.get('role')
-            if role not in ['dean', 'department_head', 'supervisor']:
+            if role not in ['owner', 'dean', 'department_head', 'supervisor']:
                 return format_response(data=None, message='تم رفض الوصول', success=False, status_code=403)
             
             return f(user=user, *args, **kwargs)
             
         except Exception as e:
             print(f"❌ خطأ في المصادقة: {str(e)}")
+            return format_response(data=None, message='فشل المصادقة', success=False, status_code=500)
+            
+    return decorated_function
+
+def owner_required(f):
+    """ديكوريتر للتحقق من صلاحيات المالك (owner)"""
+    @wraps(f)
+    @jwt_required()
+    def decorated_function(*args, **kwargs):
+        try:
+            # الحصول على اسم المستخدم من JWT
+            username = get_jwt_identity()
+            
+            # البحث عن المستخدم في قاعدة البيانات
+            user = get_user_by_username(username)
+            role = user.get('role') if user else None
+            if not user or role != 'owner':
+                return format_response(data=None, message='مطلوب صلاحيات المالك', success=False, status_code=403)
+            
+            return f(*args, **kwargs)
+            
+        except Exception as e:
+            print(f"❌ خطأ في owner_required: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return format_response(data=None, message='فشل المصادقة', success=False, status_code=500)
             
     return decorated_function
@@ -118,8 +143,8 @@ def format_response(data=None, message=None, success=True, status_code=200):
 
 def get_user_department_filter(user):
     """الحصول على فلتر القسم حسب المستخدم"""
-    if user['role'] == 'dean':
-        return None  # العميد يرى جميع الأقسام
+    if user['role'] in ['owner', 'dean']:
+        return None  # المالك والعميد يرى جميع الأقسام
     else:
         return user['department_id']  # رئيس القسم والمشرف يرون قسمهم فقط
 
