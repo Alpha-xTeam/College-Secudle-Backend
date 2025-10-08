@@ -20,7 +20,7 @@ def list_doctors():
     def protected_list_doctors():
         current_user_email = get_jwt_identity()
         role = get_user_role(current_user_email)
-        if role not in ['admin', 'dean', 'supervisor', 'department_head']:
+        if role not in ['owner', 'admin', 'dean', 'supervisor', 'department_head']:
             return jsonify({"msg": "Admins, Deans, and Supervisors only"}), 403
         
         doctors = get_all_doctors()
@@ -43,7 +43,7 @@ def add_doctor():
     def protected_add_doctor():
         current_user_email = get_jwt_identity()
         role = get_user_role(current_user_email)
-        if role not in ['admin', 'dean', 'supervisor', 'department_head']:
+        if role not in ['owner', 'admin', 'dean', 'supervisor', 'department_head']:
             return jsonify({"msg": "Admins, Deans, and Supervisors only"}), 403
         
         data = request.get_json()
@@ -75,7 +75,7 @@ def doctor_endpoint(doctor_id):
     def protected_doctor_endpoint():
         current_user_email = get_jwt_identity()
         role = get_user_role(current_user_email)
-        if role not in ['admin', 'dean', 'supervisor', 'department_head']:
+        if role not in ['owner', 'admin', 'dean', 'supervisor', 'department_head']:
             return jsonify({"msg": "Admins, Deans, and Supervisors only"}), 403
         
         if request.method == 'PUT':
@@ -189,7 +189,7 @@ def list_departments():
         verify_jwt_in_request(optional=True)
         current_user_email = get_jwt_identity()
         role = get_user_role(current_user_email) if current_user_email else None
-        if role and role not in ['admin', 'dean', 'faculty']:
+        if role and role not in ['owner', 'admin', 'dean', 'faculty']:
             return jsonify({"msg": "Access denied"}), 403
     except:
         # If no valid JWT, still allow access to departments
