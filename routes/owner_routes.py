@@ -69,9 +69,11 @@ def owner_dashboard():
 def get_all_users():
     """الحصول على جميع المستخدمين"""
     try:
+        print("Owner get_all_users called")
         supabase = current_app.supabase
         
         users_res = supabase.table("users").select("*").execute()
+        print(f"Users query result: {len(users_res.data) if users_res.data else 0} users")
         
         # إضافة أسماء الأقسام
         departments_res = supabase.table("departments").select("id, name").execute()
@@ -83,9 +85,12 @@ def get_all_users():
             else:
                 user["department_name"] = "No Department"
         
-        return format_response(data=users_res.data, message="تم جلب جميع المستخدمين")
+        result = format_response(data=users_res.data, message="تم جلب جميع المستخدمين")
+        print(f"Returning users data: {len(users_res.data) if users_res.data else 0} users")
+        return result
         
     except Exception as e:
+        print(f"Error in get_all_users: {str(e)}")
         return format_response(
             message=f"حدث خطأ: {str(e)}", success=False, status_code=500
         )

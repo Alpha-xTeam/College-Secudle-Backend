@@ -1,5 +1,5 @@
 from flask import Blueprint, request, current_app
-from flask_jwt_extended import jwt_required
+from flask_jwt_extended import jwt_required, get_jwt_identity
 from models import (
     get_all_departments,
     get_user_by_username,
@@ -428,8 +428,15 @@ def get_users():
     try:
         supabase = current_app.supabase
         
-        # Fetch users without joining departments
-        users_res = supabase.table("users").select("*").neq("role", "dean").execute()
+        # الحصول على المستخدم الحالي لمعرفة رتبته
+        username = get_jwt_identity()
+        current_user = get_user_by_username(username)
+        
+        # Fetch users - الـ owner يرى الجميع، الآخرون لا يرون الـ dean
+        if current_user and current_user.get('role') == 'owner':
+            users_res = supabase.table("users").select("*").execute()
+        else:
+            users_res = supabase.table("users").select("*").neq("role", "dean").execute()
         
         # Fetch departments to map department_id to department name
         departments_res = supabase.table("departments").select("id, name").execute()
