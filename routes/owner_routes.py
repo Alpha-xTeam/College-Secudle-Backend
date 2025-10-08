@@ -80,6 +80,10 @@ def get_all_users():
         departments_dict = {dept["id"]: dept["name"] for dept in departments_res.data}
         
         for user in users_res.data:
+            # Ensure frontend expects `full_name` consistently
+            if not user.get('full_name') and user.get('name'):
+                user['full_name'] = user.get('name')
+            
             if user.get("department_id"):
                 user["department_name"] = departments_dict.get(user["department_id"], "Unknown")
             else:
