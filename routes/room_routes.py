@@ -345,9 +345,19 @@ def delete_room(room_id):
 
         # حذف جميع البيانات المرتبطة بالقاعة بالترتيب الصحيح
         try:
-            # 1. جلب جميع الجداول المرتبطة بالقاعة
-            schedules_res = supabase.table("schedules").select("id").eq("room_id", room_id).execute()
+            # 1. جلب جميع الجداول المرتبطة بالقاعة في أي حقل
+            schedules_res = supabase.table("schedules").select("id, moved_to_schedule_id").or_(
+                f"room_id.eq.{room_id},original_room_id.eq.{room_id},postponed_to_room_id.eq.{room_id}"
+            ).execute()
             schedule_ids = [s["id"] for s in schedules_res.data] if schedules_res.data else []
+            
+            # أضف moved_to_schedule_id إذا كان موجوداً
+            for s in schedules_res.data:
+                if s.get("moved_to_schedule_id"):
+                    schedule_ids.append(s["moved_to_schedule_id"])
+            
+            # إزالة التكرارات
+            schedule_ids = list(set(schedule_ids))
             
             # 2. حذف schedule_doctors للجداول المرتبطة
             if schedule_ids:
@@ -357,23 +367,36 @@ def delete_room(room_id):
                     except Exception as sd_err:
                         print(f"خطأ في حذف schedule_doctors للجدول {schedule_id}: {str(sd_err)}")
             
-            # 3. حذف الإعلانات المرتبطة بالقاعة
+            # 3. nullify أي references إلى هذه schedules
+            for schedule_id in schedule_ids:
+                try:
+                    supabase.table("schedules").update({"moved_to_schedule_id": None}).eq("moved_to_schedule_id", schedule_id).execute()
+                    supabase.table("schedules").update({"original_schedule_id": None}).eq("original_schedule_id", schedule_id).execute()
+                except Exception as ref_err:
+                    print(f"خطأ في nullify references للجدول {schedule_id}: {str(ref_err)}")
+            
+            # 4. حذف الإعلانات المرتبطة بالقاعة
             try:
                 supabase.table("announcements").delete().eq("room_id", room_id).execute()
             except Exception as ann_err:
                 print(f"خطأ في حذف الإعلانات: {str(ann_err)}")
             
-            # 4. حذف الجداول (schedules)
-            supabase.table("schedules").delete().eq("room_id", room_id).execute()
+            # 5. حذف الجداول (schedules)
+            if schedule_ids:
+                for schedule_id in schedule_ids:
+                    try:
+                        supabase.table("schedules").delete().eq("id", schedule_id).execute()
+                    except Exception as sch_err:
+                        print(f"خطأ في حذف الجدول {schedule_id}: {str(sch_err)}")
             
-            # 5. حذف ملف QR إن وجد
+            # 6. حذف ملف QR إن وجد
             if room.get("qr_code_path"):
                 try:
                     delete_room_qr(room["qr_code_path"])
                 except Exception as qr_err:
                     print(f"خطأ في حذف QR: {str(qr_err)}")
             
-            # 6. حذف القاعة نفسها
+            # 7. حذف القاعة نفسها
             supabase.table("rooms").delete().eq("id", room_id).execute()
             
             return format_response(message="تم حذف القاعة بنجاح")
