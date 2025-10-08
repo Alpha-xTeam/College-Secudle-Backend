@@ -284,6 +284,70 @@ def get_departments_public():
         )
 
 
+@public_bp.route("/departments/summary", methods=["GET"])
+def get_departments_summary():
+    """إرجاع ملخص عن الأقسام: عدد القاعات، عدد الدكاترة، اسم رئيس القسم، وقائمة القاعات مع السعة واسم ملف QR (عام - بدون تسجيل دخول)"""
+    try:
+        supabase = current_app.supabase
+        departments_res = supabase.table("departments").select("*").execute()
+        if not departments_res.data:
+            return format_response(data=[], message="لا توجد أقسام");
+
+        summary = []
+        import os
+        for dept in departments_res.data:
+            dept_id = dept.get("id")
+            # Rooms for this department
+            rooms_res = (
+                supabase.table("rooms")
+                .select("id,name,code,capacity,qr_code_path")
+                .eq("department_id", dept_id)
+                .eq("is_active", True)
+                .execute()
+            )
+            rooms = []
+            if rooms_res.data:
+                for r in rooms_res.data:
+                    qr_path = r.get("qr_code_path")
+                    qr_filename = os.path.basename(qr_path) if qr_path else None
+                    rooms.append({
+                        "id": r.get("id"),
+                        "name": r.get("name"),
+                        "code": r.get("code"),
+                        "capacity": r.get("capacity"),
+                        "qr_filename": qr_filename,
+                    })
+
+            # Count doctors in dept
+            doctors_count_res = (
+                supabase.table("doctors").select("id", count="exact").eq("department_id", dept_id).execute()
+            )
+            doctors_count = doctors_count_res.count if doctors_count_res is not None else 0
+
+            # Find department head name (user with role department_head)
+            head_res = (
+                supabase.table("users").select("full_name").eq("department_id", dept_id).eq("role", "department_head").limit(1).execute()
+            )
+            head_name = None
+            if head_res and head_res.data:
+                head_name = head_res.data[0].get("full_name")
+
+            summary.append({
+                "id": dept_id,
+                "name": dept.get("name"),
+                "head_name": head_name,
+                "doctors_count": doctors_count,
+                "rooms": rooms,
+            })
+
+        return format_response(data=summary, message="تم جلب ملخص الأقسام بنجاح")
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return format_response(message=f"حدث خطأ: {str(e)}", success=False, status_code=500)
+
+
 @public_bp.route("/search/rooms", methods=["GET"])
 def search_rooms():
     """البحث في القاعات (محمية)"""

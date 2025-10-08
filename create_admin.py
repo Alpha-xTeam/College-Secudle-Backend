@@ -25,13 +25,13 @@ def add_admin_user():
         try:
             admin_user = User(
                 username='admin',
-                email='moqtadali473@gmail.com',
+                email='Wissam_Bahiya@it-college.zone.id',
                 full_name='Admin User',
                 role='dean',
                 is_active=True,
                 created_at=datetime.utcnow()
             )
-            admin_user.set_password('admin123')
+            admin_user.set_password('Admin@2025')
             
             db.session.add(admin_user)
             db.session.commit()

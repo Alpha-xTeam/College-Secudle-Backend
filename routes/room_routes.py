@@ -343,16 +343,47 @@ def delete_room(room_id):
                 status_code=403,
             )
 
-        if room["qr_code_path"]:
+        # حذف جميع البيانات المرتبطة بالقاعة بالترتيب الصحيح
+        try:
+            # 1. جلب جميع الجداول المرتبطة بالقاعة
+            schedules_res = supabase.table("schedules").select("id").eq("room_id", room_id).execute()
+            schedule_ids = [s["id"] for s in schedules_res.data] if schedules_res.data else []
+            
+            # 2. حذف schedule_doctors للجداول المرتبطة
+            if schedule_ids:
+                for schedule_id in schedule_ids:
+                    try:
+                        supabase.table("schedule_doctors").delete().eq("schedule_id", schedule_id).execute()
+                    except Exception as sd_err:
+                        print(f"خطأ في حذف schedule_doctors للجدول {schedule_id}: {str(sd_err)}")
+            
+            # 3. حذف الإعلانات المرتبطة بالقاعة
             try:
-                delete_room_qr(room["qr_code_path"])
-            except:
-                pass
-
-        supabase.table("schedules").delete().eq("room_id", room_id).execute()
-        supabase.table("rooms").delete().eq("id", room_id).execute()
-
-        return format_response(message="تم حذف القاعة بنجاح")
+                supabase.table("announcements").delete().eq("room_id", room_id).execute()
+            except Exception as ann_err:
+                print(f"خطأ في حذف الإعلانات: {str(ann_err)}")
+            
+            # 4. حذف الجداول (schedules)
+            supabase.table("schedules").delete().eq("room_id", room_id).execute()
+            
+            # 5. حذف ملف QR إن وجد
+            if room.get("qr_code_path"):
+                try:
+                    delete_room_qr(room["qr_code_path"])
+                except Exception as qr_err:
+                    print(f"خطأ في حذف QR: {str(qr_err)}")
+            
+            # 6. حذف القاعة نفسها
+            supabase.table("rooms").delete().eq("id", room_id).execute()
+            
+            return format_response(message="تم حذف القاعة بنجاح")
+            
+        except Exception as delete_err:
+            return format_response(
+                message=f"فشل في حذف القاعة: {str(delete_err)}", 
+                success=False, 
+                status_code=500
+            )
 
     except Exception as e:
         return format_response(
