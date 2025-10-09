@@ -147,7 +147,7 @@ def create_user():
         }
         
         # تشفير كلمة المرور
-        from utils.helpers import set_password
+        from models import set_password
         user_data['password_hash'] = set_password(data['password'])
         
         user_res = supabase.table("users").insert(user_data).execute()
@@ -194,7 +194,7 @@ def update_user_route(user_id):
                 update_data[field] = data[field]
         
         if data.get("password"):
-            from utils.helpers import set_password
+            from models import set_password
             update_data['password_hash'] = set_password(data['password'])
         
         if update_data:

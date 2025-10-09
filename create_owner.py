@@ -1,5 +1,5 @@
 from models import create_user
-from utils.helpers import set_password
+from models import set_password
 
 def create_owner():
     """إنشاء مستخدم المالك"""
