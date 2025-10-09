@@ -58,11 +58,16 @@ def create_app():
                 app.logger.debug("Handling early CORS preflight for %s", request.path)
                 response = jsonify()
                 origin = request.headers.get('Origin')
-                if origin and (('*' in allowed_origins) or origin in allowed_origins):
-                    response.headers.add("Access-Control-Allow-Origin", origin if '*' not in allowed_origins else '*')
+                # For debugging and to ensure browsers get CORS headers even if origin
+                # isn't yet listed in CORS_ORIGINS, echo the request Origin when present.
+                # In production you may want to restrict this to only allowed_origins.
+                if origin:
+                    response.headers.add("Access-Control-Allow-Origin", origin)
                 else:
                     if allowed_origins:
                         response.headers.add("Access-Control-Allow-Origin", allowed_origins[0])
+                # Vary header signals responses are origin-dependent
+                response.headers.add('Vary', 'Origin')
                 response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,apikey,Access-Control-Allow-Headers,Origin,Accept,X-Requested-With")
                 response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,PATCH,DELETE,OPTIONS")
                 response.headers.add('Access-Control-Allow-Credentials', 'true')
@@ -71,12 +76,33 @@ def create_app():
             # If anything goes wrong while handling preflight, log and return a safe preflight response
             app.logger.exception("Exception while handling preflight: %s", e)
             safe = jsonify()
-            if allowed_origins:
+            # Best-effort safe echo for debugging
+            origin = request.headers.get('Origin')
+            if origin:
+                safe.headers.add("Access-Control-Allow-Origin", origin)
+            elif allowed_origins:
                 safe.headers.add("Access-Control-Allow-Origin", allowed_origins[0])
+            safe.headers.add('Vary', 'Origin')
             safe.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,apikey,Access-Control-Allow-Headers,Origin,Accept,X-Requested-With")
             safe.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,PATCH,DELETE,OPTIONS")
             safe.headers.add('Access-Control-Allow-Credentials', 'true')
             return safe
+
+    # Generic OPTIONS route to catch any /api/* preflight requests at the routing level.
+    @app.route('/api/<path:unused>', methods=['OPTIONS'])
+    def catch_all_api_options(unused: str):
+        # Build a safe preflight response with required headers
+        resp = jsonify()
+        origin = request.headers.get('Origin')
+        if origin:
+            resp.headers['Access-Control-Allow-Origin'] = origin
+        elif allowed_origins:
+            resp.headers['Access-Control-Allow-Origin'] = allowed_origins[0]
+        resp.headers['Vary'] = 'Origin'
+        resp.headers['Access-Control-Allow-Headers'] = "Content-Type,Authorization,apikey,Access-Control-Allow-Headers,Origin,Accept,X-Requested-With"
+        resp.headers['Access-Control-Allow-Methods'] = "GET,PUT,POST,PATCH,DELETE,OPTIONS"
+        resp.headers['Access-Control-Allow-Credentials'] = 'true'
+        return resp
 
     # Register blueprints
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
