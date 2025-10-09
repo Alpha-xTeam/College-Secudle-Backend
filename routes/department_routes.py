@@ -311,53 +311,8 @@ def get_room(user, room_id):
 
 
 
-@dept_bp.route("/statistics", methods=["GET"])
-@department_access_required
-def get_department_statistics(user):
-    """إحصائيات القسم"""
-    try:
-        supabase = current_app.supabase
-        dept_filter = get_user_department_filter(user)
-
-        if dept_filter:
-            # إحصائيات قسم محدد
-            total_rooms = supabase.table("rooms").select("id", count="exact").eq("department_id", dept_filter).eq("is_active", True).execute().count
-            
-            # Get room IDs for the department first
-            dept_rooms_res = supabase.table("rooms").select("id").eq("department_id", dept_filter).execute()
-            room_ids = [r['id'] for r in dept_rooms_res.data]
-            
-            if room_ids:
-                total_schedules = supabase.table("schedules").select("id", count="exact").eq("is_active", True).in_("room_id", room_ids).execute().count
-            else:
-                total_schedules = 0
-            stats = {
-                "total_rooms": total_rooms,
-                "total_schedules": total_schedules,
-            }
-
-            if user["role"] == "department_head":
-                stats["total_supervisors"] = (
-                    supabase.table("users")
-                    .select("id", count="exact")
-                    .eq("department_id", dept_filter)
-                    .eq("role", "supervisor")
-                    .eq("is_active", True)
-                    .execute()
-                    .count
-                )
-        else:
-            # إحصائيات شاملة للعميد
-            stats = {
-                "total_rooms": supabase.table("rooms").select("id", count="exact").eq("is_active", True).execute().count,
-                "total_schedules": supabase.table("schedules").select("id", count="exact").eq("is_active", True).execute().count,
-            }
-
-        return format_response(data=stats, message="تم جلب الإحصائيات بنجاح")
-    except Exception as e:
-        return format_response(
-            message=f"حدث خطأ: {str(e)}", success=False, status_code=500
-        )
+# Duplicate definition of get_department_statistics removed.
+# A single implementation exists earlier in this file to prevent endpoint collisions when registering the blueprint.
 
 
 @dept_bp.route("/announcements", methods=["POST"])
