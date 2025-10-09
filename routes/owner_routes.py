@@ -130,25 +130,31 @@ def create_user():
                 status_code=400,
             )
         
-        # التحقق من عدم وجود المستخدم
-        existing_user = supabase.table("users").select("*").eq("username", data["username"]).execute()
-        if existing_user.data:
-            return format_response(
-                message="اسم المستخدم موجود بالفعل", success=False, status_code=400
-            )
+        # التحقق من عدم وجود المستخدم (استخدم profiles للإيميل، وتجاهل username إذا فشل)
+        try:
+            existing_user = supabase.table("users").select("*").eq("username", data["username"]).execute()
+            if existing_user.data:
+                return format_response(
+                    message="اسم المستخدم موجود بالفعل", success=False, status_code=400
+                )
+        except Exception as e:
+            current_app.logger.warning(f"users table check for username failed, skipping: {str(e)}")
         
-        existing_email = supabase.table("users").select("*").eq("email", data["email"]).execute()
-        if existing_email.data:
-            return format_response(
-                message="الإيميل موجود بالفعل", success=False, status_code=400
-            )
+        try:
+            existing_email = supabase.table("profiles").select("*").eq("email", data["email"]).execute()
+            if existing_email.data:
+                return format_response(
+                    message="الإيميل موجود بالفعل", success=False, status_code=400
+                )
+        except Exception as e:
+            current_app.logger.warning(f"profiles table check for email failed, skipping: {str(e)}")
         
         # إنشاء بيانات المستخدم الأولية
         preferred_name = data.get('name') or data.get('full_name')
         user_data = {
             'username': data['username'],
             'email': data['email'],
-            'name': preferred_name,
+            'full_name': preferred_name,
             'role': data['role'],
             'department_id': data.get('department_id'),
             'is_active': data.get('is_active', True),
@@ -176,7 +182,6 @@ def create_user():
                         'full_name': preferred_name,
                         'email': data['email'],
                         'role': data['role'],
-                        'created_at': datetime.utcnow().isoformat(),
                     }
                     profile_res = supabase.table('profiles').insert(profile_data).execute()
                     if profile_res and profile_res.data:
