@@ -19,7 +19,7 @@ class Config:
     # CORS origins: comma-separated list (development and production).
     # Include both local dev and deployed pythonanywhere hosts used by the project.
     # Example: 'http://localhost:3033,https://hsabadi.pythonanywhere.com,https://hsabadj.pythonanywhere.com'
-    CORS_ORIGINS = os.environ.get('CORS_ORIGINS', 'http://localhost:3033,https://hsabadi.pythonanywhere.com,https://hsabadj.pythonanywhere.com')
+    CORS_ORIGINS = os.environ.get('CORS_ORIGINS', 'http://localhost:3000,http://localhost:3033,https://www.it-college.zone.id')
     
     # File Upload Configuration
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
