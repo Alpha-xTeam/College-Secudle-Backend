@@ -27,8 +27,12 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
-    # Enable CORS for API routes (explicit init via flask_cors to cover error responses and preflight)
-    CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
+    # Enable CORS for API routes using configured allowed origins
+    # Read allowed origins from config (comma separated)
+    raw_origins = app.config.get('CORS_ORIGINS', '') or ''
+    allowed_origins = [o.strip() for o in raw_origins.split(',') if o.strip()]
+    # Initialize flask-cors with the list (avoid wildcard when using credentials)
+    CORS(app, resources={r"/api/*": {"origins": allowed_origins or []}}, supports_credentials=True)
 
     # Configure file upload limits
     app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
@@ -61,7 +65,14 @@ def create_app():
     def handle_preflight():
         if request.method == "OPTIONS":
             response = jsonify()
-            response.headers.add("Access-Control-Allow-Origin", "*")
+            origin = request.headers.get('Origin')
+            # If origin is allowed, echo it; otherwise fall back to configured first origin or allow none
+            if origin and (('*' in allowed_origins) or origin in allowed_origins):
+                response.headers.add("Access-Control-Allow-Origin", origin if '*' not in allowed_origins else '*')
+            else:
+                # If frontend origin configured, echo the first one to support credentials
+                if allowed_origins:
+                    response.headers.add("Access-Control-Allow-Origin", allowed_origins[0])
             response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,apikey,Access-Control-Allow-Headers,Origin,Accept,X-Requested-With")
             response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,PATCH,DELETE,OPTIONS")
             response.headers.add('Access-Control-Allow-Credentials', 'true')
@@ -70,14 +81,19 @@ def create_app():
     # Add CORS headers to all responses
     @app.after_request
     def add_cors_headers(response):
-        if "Access-Control-Allow-Origin" not in response.headers:
-            response.headers.add("Access-Control-Allow-Origin", "*")
-        if "Access-Control-Allow-Headers" not in response.headers:
-            response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization,apikey,Access-Control-Allow-Headers,Origin,Accept,X-Requested-With")
-        if "Access-Control-Allow-Methods" not in response.headers:
-            response.headers.add("Access-Control-Allow-Methods", "GET,PUT,POST,PATCH,DELETE,OPTIONS")
-        if "Access-Control-Allow-Credentials" not in response.headers:
-            response.headers.add("Access-Control-Allow-Credentials", "true")
+        origin = request.headers.get('Origin')
+        # Prefer echoing the request Origin when allowed (required for credentials)
+        if origin and (('*' in allowed_origins) or origin in allowed_origins):
+            response.headers['Access-Control-Allow-Origin'] = origin if '*' not in allowed_origins else '*'
+        else:
+            # Fallback to first configured origin or keep wildcard if configured
+            if allowed_origins:
+                response.headers.setdefault('Access-Control-Allow-Origin', allowed_origins[0])
+            else:
+                response.headers.setdefault('Access-Control-Allow-Origin', '*')
+        response.headers.setdefault("Access-Control-Allow-Headers", "Content-Type,Authorization,apikey,Access-Control-Allow-Headers,Origin,Accept,X-Requested-With")
+        response.headers.setdefault("Access-Control-Allow-Methods", "GET,PUT,POST,PATCH,DELETE,OPTIONS")
+        response.headers.setdefault("Access-Control-Allow-Credentials", "true")
         return response
     
     # Root route for testing

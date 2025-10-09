@@ -40,7 +40,8 @@ def get_rooms():
         # Fetch rooms without joining departments
         query = supabase.table("rooms").select("*").eq("is_active", True)
 
-        if user["role"] != "dean":
+        # Allow 'dean' and 'owner' to view all rooms. Other roles must be tied to a department.
+        if user["role"] not in ["dean", "owner"]:
             if not user.get("department_id"):
                 return format_response(
                     message="المستخدم غير مرتبط بقسم",
@@ -99,7 +100,7 @@ def create_room():
                 message="المستخدم غير موجود", success=False, status_code=404
             )
 
-        if user["role"] not in ["dean", "department_head", "supervisor"]:
+        if user["role"] not in ["owner", "dean", "department_head", "supervisor"]:
             return format_response(
                 message="صلاحيات غير كافية", success=False, status_code=403
             )
@@ -122,6 +123,20 @@ def create_room():
                 message="معرف القسم مطلوب", success=False, status_code=400
             )
 
+        # Handle capacity: convert empty string to None
+        capacity = data.get("capacity")
+        if capacity == "" or capacity is None:
+            capacity = None
+        else:
+            try:
+                capacity = int(capacity)
+            except (ValueError, TypeError):
+                return format_response(
+                    message="السعة يجب أن تكون رقماً صحيحاً",
+                    success=False,
+                    status_code=400,
+                )
+
         room_res = (
             supabase.table("rooms")
             .insert(
@@ -129,7 +144,7 @@ def create_room():
                     "name": data["name"],
                     "code": data["code"],
                     "department_id": department_id,
-                    "capacity": data.get("capacity"),
+                    "capacity": capacity,
                     "description": data.get("description", ""),
                 }
             )
@@ -213,7 +228,7 @@ def get_room(room_id):
                     success=False,
                     status_code=403,
                 )
-        elif user["role"] != "dean" and room["department_id"] != user["department_id"]:
+        elif user["role"] not in ["dean", "owner"] and room["department_id"] != user["department_id"]:
             return format_response(
                 message="لا يمكنك الوصول لهذه القاعة",
                 success=False,
@@ -448,7 +463,7 @@ def get_room_schedules(room_id):
                     success=False,
                     status_code=403,
                 )
-        elif user["role"] != "dean" and room["department_id"] != user["department_id"]:
+        elif user["role"] not in ["dean", "owner"] and room["department_id"] != user["department_id"]:
             return format_response(
                 message="لا يمكنك الوصول لهذه القاعة",
                 success=False,
@@ -516,7 +531,8 @@ def create_schedule(room_id):
                 message="المستخدم غير موجود", success=False, status_code=404
             )
 
-        if user["role"] not in ["dean", "department_head", "supervisor"]:
+        # Allow owners to manage schedules as well as deans and department heads
+        if user["role"] not in ["dean", "owner", "department_head", "supervisor"]:
             return format_response(
                 message="ليس لديك صلاحية لهذا الإجراء",
                 success=False,
@@ -629,7 +645,8 @@ def create_schedule(room_id):
             )
         room = room_res.data[0]
 
-        if user["role"] != "dean" and room["department_id"] != user["department_id"]:
+        # Dean and Owner can manage schedules across all departments
+        if user["role"] not in ["dean", "owner"] and room["department_id"] != user["department_id"]:
             return format_response(
                 message="لا يمكنك إدارة جداول هذه القاعة",
                 success=False,
@@ -1225,7 +1242,8 @@ def update_schedule(room_id, schedule_id):
                 message="المستخدم غير موجود", success=False, status_code=404
             )
 
-        if user["role"] not in ["dean", "department_head", "supervisor"]:
+        # Owner should be able to update schedules as well
+        if user["role"] not in ["dean", "owner", "department_head", "supervisor"]:
             return format_response(
                 message="ليس لديك صلاحية لهذا الإجراء",
                 success=False,
@@ -1312,7 +1330,7 @@ def update_schedule(room_id, schedule_id):
 
         current_schedule = schedule_res.data[0]
 
-        if user["role"] != "dean" and room["department_id"] != user["department_id"]:
+        if user["role"] not in ["dean", "owner"] and room["department_id"] != user["department_id"]:
             return format_response(
                 message="لا يمكنك تعديل جداول هذه القاعة",
                 success=False,
@@ -1581,7 +1599,7 @@ def delete_schedule(user, room_id, schedule_id):
             )
         schedule = schedule_res.data[0]
 
-        if user["role"] != "dean" and room["department_id"] != user["department_id"]:
+        if user["role"] not in ["dean", "owner"] and room["department_id"] != user["department_id"]:
             return format_response(
                 message="لا يمكنك حذف جداول هذه القاعة",
                 success=False,
@@ -1633,7 +1651,7 @@ def get_room_qr(room_id):
             )
         room = room_res.data[0]
 
-        if user["role"] != "dean" and room["department_id"] != user["department_id"]:
+        if user["role"] not in ["dean", "owner"] and room["department_id"] != user["department_id"]:
             return format_response(
                 message="لا يمكنك الوصول لهذه القاعة",
                 success=False,
@@ -1677,7 +1695,7 @@ def regenerate_room_qr(room_id):
                 message="المستخدم غير موجود", success=False, status_code=404
             )
 
-        if user["role"] not in ["dean", "department_head", "supervisor"]:
+        if user["role"] not in ["owner", "dean", "department_head", "supervisor"]:
             return format_response(
                 message="صلاحيات غير كافية", success=False, status_code=403
             )
@@ -1689,7 +1707,7 @@ def regenerate_room_qr(room_id):
             )
         room = room_res.data[0]
 
-        if user["role"] != "dean" and room["department_id"] != user["department_id"]:
+        if user["role"] not in ["dean", "owner"] and room["department_id"] != user["department_id"]:
             return format_response(
                 message="لا يمكنك إعادة إنشاء QR Code لهذه القاعة",
                 success=False,
@@ -1739,7 +1757,8 @@ def postpone_schedule(room_id, schedule_id):
                 message="المستخدم غير موجود", success=False, status_code=404
             )
 
-        if user["role"] not in ["dean", "department_head", "supervisor"]:
+        # Allow owners to postpone schedules as well as deans and department heads
+        if user["role"] not in ["dean", "owner", "department_head", "supervisor"]:
             return format_response(
                 message="ليس لديك صلاحية لهذا الإجراء",
                 success=False,
@@ -1876,6 +1895,15 @@ def postpone_schedule(room_id, schedule_id):
         new_room_code = new_room_info.data[0]['code'] if new_room_info.data else data['postponed_to_room_id']
         original_dept_id = original_room_info.data[0]['department_id'] if original_room_info.data else original_schedule.get('department_id')
         new_dept_id = new_room_info.data[0]['department_id'] if new_room_info.data else None
+
+        # Only allow non-dean/non-owner users to postpone schedules within their department
+        if user["role"] not in ["dean", "owner"]:
+            if original_dept_id and original_dept_id != user.get("department_id"):
+                return format_response(
+                    message="لا يمكنك تأجيل جدول خارج قسمك",
+                    success=False,
+                    status_code=403,
+                )
 
         # جلب اسم القسمين
         original_dept_name = None
@@ -2095,7 +2123,8 @@ def upload_weekly_schedule(room_id):
                 message="المستخدم غير موجود", success=False, status_code=404
             )
 
-        if user["role"] not in ["dean", "department_head", "supervisor"]:
+        # Owner can delete all schedules for a room as well
+        if user["role"] not in ["dean", "owner", "department_head", "supervisor"]:
             return format_response(
                 message="ليس لديك صلاحية لهذا الإجراء",
                 success=False,
@@ -2413,7 +2442,8 @@ def upload_general_weekly_schedule():
                 message="المستخدم غير موجود", success=False, status_code=404
             )
 
-        if user["role"] != "dean": # Only dean can upload general schedule
+        # Allow owner or dean to upload a general weekly schedule
+        if user["role"] not in ["dean", "owner"]:
             return format_response(
                 message="ليس لديك صلاحية لهذا الإجراء",
                 success=False,
@@ -2849,7 +2879,8 @@ def delete_all_schedules(room_id):
                 message="المستخدم غير موجود", success=False, status_code=404
             )
 
-        if user["role"] not in ["dean", "department_head", "supervisor"]:
+        # Allow owners to upload weekly schedules for a room as well
+        if user["role"] not in ["dean", "owner", "department_head", "supervisor"]:
             return format_response(
                 message="ليس لديك صلاحية لهذا الإجراء",
                 success=False,

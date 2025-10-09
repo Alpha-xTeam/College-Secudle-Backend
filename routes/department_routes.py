@@ -281,7 +281,7 @@ def get_room(user, room_id):
             )
 
         room = room_res.data[0]
-        if user["role"] != "dean" and room["department_id"] != user["department_id"]:
+        if user["role"] not in ["dean", "owner"] and room["department_id"] != user["department_id"]:
             return format_response(
                 message="لا يمكنك الوصول لهذه القاعة", success=False, status_code=403
             )
@@ -317,7 +317,7 @@ def get_room_schedules(user, room_id):
             )
 
         room = room_res.data[0]
-        if user["role"] != "dean" and room["department_id"] != user["department_id"]:
+        if user["role"] not in ["dean", "owner"] and room["department_id"] != user["department_id"]:
             return format_response(
                 message="لا يمكنك الوصول لهذه القاعة", success=False, status_code=403
             )
@@ -787,4 +787,632 @@ def get_available_rooms_for_department(user, department_id):
             message=f"حدث خطأ: {str(e)}",
             success=False,
             status_code=500
+        )
+
+
+@dept_bp.route("/rooms", methods=["POST"])
+@department_access_required
+def create_room(user):
+    """إنشاء قاعة جديدة"""
+    try:
+        supabase = current_app.supabase
+        data = request.get_json()
+        
+        if not data:
+            return format_response(
+                message="لم يتم توفير بيانات", success=False, status_code=400
+            )
+        
+        required_fields = ["name", "code"]
+        for field in required_fields:
+            if field not in data or not data[field]:
+                return format_response(
+                    message=f"الحقل المطلوب مفقود: {field}",
+                    success=False,
+                    status_code=400,
+                )
+        
+        # التحقق من عدم وجود القاعة
+        existing_room = supabase.table("rooms").select("*").eq("code", data["code"]).execute()
+        if existing_room.data:
+            return format_response(
+                message="رمز القاعة موجود بالفعل", success=False, status_code=400
+            )
+        
+        # تحديد القسم
+        department_id = data.get("department_id")
+        if not department_id:
+            if user["role"] == "department_head":
+                department_id = user["department_id"]
+            else:
+                return format_response(
+                    message="يجب تحديد القسم", success=False, status_code=400
+                )
+        
+        # التحقق من صلاحية القسم
+        if user["role"] == "department_head" and department_id != user["department_id"]:
+            return format_response(
+                message="لا يمكنك إنشاء قاعة في قسم آخر", success=False, status_code=403
+            )
+        
+        # إنشاء القاعة
+        room_data = {
+            'name': data['name'],
+            'code': data['code'],
+            'department_id': department_id,
+            'capacity': data.get('capacity'),
+            'description': data.get('description'),
+            'is_active': data.get('is_active', True),
+            'created_at': datetime.utcnow().isoformat(),
+        }
+        
+        room_res = supabase.table("rooms").insert(room_data).execute()
+        
+        if room_res.data:
+            return format_response(data=room_res.data[0], message="تم إنشاء القاعة بنجاح")
+        else:
+            return format_response(
+                message="فشل في إنشاء القاعة", success=False, status_code=500
+            )
+        
+    except Exception as e:
+        return format_response(
+            message=f"حدث خطأ: {str(e)}", success=False, status_code=500
+        )
+
+
+@dept_bp.route("/schedules/<int:room_id>", methods=["GET"])
+@department_access_required
+def get_room_schedules(user, room_id):
+    """الحصول على جداول قاعة معينة"""
+    try:
+        supabase = current_app.supabase
+        room_res = supabase.table("rooms").select("id, department_id").eq("id", room_id).execute()
+        if not room_res.data:
+            return format_response(
+                message="القاعة غير موجودة", success=False, status_code=404
+            )
+
+        room = room_res.data[0]
+        if user["role"] not in ["dean", "owner"] and room["department_id"] != user["department_id"]:
+            return format_response(
+                message="لا يمكنك الوصول لهذه القاعة", success=False, status_code=403
+            )
+
+        schedules_res = (
+            supabase.table("schedules")
+            .select("*, rooms!schedules_room_id_fkey(name, code), doctors!fk_doctor(name)")
+            .eq("room_id", room_id)
+            .eq("is_active", True)
+            .execute()
+        )
+
+        # Get multiple doctors for each schedule
+        from models import get_schedule_doctors
+        for schedule in schedules_res.data:
+            schedule_doctors = get_schedule_doctors(schedule["id"])
+            schedule["schedule_doctors"] = schedule_doctors
+            
+            # Create a list of doctor names for display
+            if schedule_doctors:
+                doctor_names = []
+                primary_doctor = None
+                for sd in schedule_doctors:
+                    doctor_name = sd.get('doctors', {}).get('name', '')
+                    if sd.get('is_primary'):
+                        primary_doctor = doctor_name
+                    doctor_names.append(doctor_name)
+                
+                schedule["multiple_doctors_names"] = doctor_names
+                schedule["primary_doctor_name"] = primary_doctor
+                schedule["has_multiple_doctors"] = len(doctor_names) > 1
+
+        # Check for postponements today and in the future
+        from datetime import datetime
+        # Use simple date comparison without timezone for now
+        today = datetime.now().date()
+        
+        # List to store schedules that should be displayed (original or postponed)
+        display_schedules = []
+        
+        # Process schedules to determine what should be displayed
+        for schedule in schedules_res.data:
+            # Check if this schedule has a postponement
+            if schedule.get("is_postponed") and schedule.get("postponed_date"):
+                postponed_date = datetime.strptime(schedule["postponed_date"], "%Y-%m-%d").date()
+                # Check if the postponement is today or in the future
+                if postponed_date >= today:
+                    # Add postponement info to the schedule
+                    schedule["is_postponed_today"] = (postponed_date == today)
+                    schedule["postponed_to_room_id"] = schedule.get("postponed_to_room_id")
+                    schedule["postponed_reason"] = schedule.get("postponed_reason")
+                    schedule["postponed_start_time"] = schedule.get("postponed_start_time")
+                    schedule["postponed_end_time"] = schedule.get("postponed_end_time")
+                    # Add the postponed date for frontend processing
+                    schedule["postponed_full_date"] = schedule.get("postponed_date")
+                    
+                    # Get the name of the postponed room if available
+                    if schedule.get("postponed_to_room_id"):
+                        postponed_room_res = (
+                            supabase.table("rooms")
+                            .select("name, code")
+                            .eq("id", schedule["postponed_to_room_id"])
+                            .execute()
+                        )
+                        if postponed_room_res.data:
+                            schedule["postponed_room_name"] = postponed_room_res.data[0].get("name", "")
+                            schedule["postponed_room_code"] = postponed_room_res.data[0].get("code", "")
+                    
+                    # For both future and today's postponements, show only one card - the original schedule with postponement details
+                    display_schedules.append(schedule)
+                else:
+                    schedule["is_postponed_today"] = False
+                    # Show original schedule if postponement date has passed
+                    display_schedules.append(schedule)
+            else:
+                schedule["is_postponed_today"] = False
+                # Show original schedule if no postponement
+                display_schedules.append(schedule)
+
+        return format_response(data=display_schedules, message="تم جلب الجداول بنجاح")
+
+    except Exception as e:
+        return format_response(
+            message=f"حدث خطأ: {str(e)}", success=False, status_code=500
+        )
+
+
+
+
+
+@dept_bp.route("/statistics", methods=["GET"])
+@department_access_required
+def get_department_statistics(user):
+    """إحصائيات القسم"""
+    try:
+        supabase = current_app.supabase
+        dept_filter = get_user_department_filter(user)
+
+        if dept_filter:
+            # إحصائيات قسم محدد
+            total_rooms = supabase.table("rooms").select("id", count="exact").eq("department_id", dept_filter).eq("is_active", True).execute().count
+            
+            # Get room IDs for the department first
+            dept_rooms_res = supabase.table("rooms").select("id").eq("department_id", dept_filter).execute()
+            room_ids = [r['id'] for r in dept_rooms_res.data]
+            
+            if room_ids:
+                total_schedules = supabase.table("schedules").select("id", count="exact").eq("is_active", True).in_("room_id", room_ids).execute().count
+            else:
+                total_schedules = 0
+            stats = {
+                "total_rooms": total_rooms,
+                "total_schedules": total_schedules,
+            }
+
+            if user["role"] == "department_head":
+                stats["total_supervisors"] = (
+                    supabase.table("users")
+                    .select("id", count="exact")
+                    .eq("department_id", dept_filter)
+                    .eq("role", "supervisor")
+                    .eq("is_active", True)
+                    .execute()
+                    .count
+                )
+        else:
+            # إحصائيات شاملة للعميد
+            stats = {
+                "total_rooms": supabase.table("rooms").select("id", count="exact").eq("is_active", True).execute().count,
+                "total_schedules": supabase.table("schedules").select("id", count="exact").eq("is_active", True).execute().count,
+            }
+
+        return format_response(data=stats, message="تم جلب الإحصائيات بنجاح")
+    except Exception as e:
+        return format_response(
+            message=f"حدث خطأ: {str(e)}", success=False, status_code=500
+        )
+
+
+@dept_bp.route("/announcements", methods=["POST"])
+@department_access_required
+@validate_json_data(["title", "body"])
+def dept_create_announcement(data, user):
+    """إنشاء إعلان جديد في قسم المستخدم (رئيس القسم أو المشرف)"""
+    try:
+        if user["role"] not in ["department_head", "supervisor"]:
+            return format_response(
+                message="هذه الوظيفة متاحة لرئيس القسم أو المشرف فقط",
+                success=False,
+                status_code=403,
+            )
+        supabase = current_app.supabase
+        ann_data = {
+            "department_id": user["department_id"],
+            "title": data["title"],
+            "body": data["body"],
+            "is_global": False,
+            "is_active": True,
+        }
+        if data.get("starts_at"):
+            ann_data["starts_at"] = data["starts_at"]
+        if data.get("expires_at"):
+            ann_data["expires_at"] = data["expires_at"]
+
+        ann_res = supabase.table("announcements").insert(ann_data).execute()
+        return format_response(
+            data=ann_res.data[0], message="تم إنشاء الإعلان", status_code=201
+        )
+    except Exception as e:
+        return format_response(message=f"حدث خطأ: {str(e)}", success=False, status_code=500)
+
+
+@dept_bp.route("/announcements", methods=["GET"])
+@department_access_required
+def dept_get_announcements(user):
+    """جلب إعلانات القسم (للعاملين في القسم)"""
+    try:
+        supabase = current_app.supabase
+        
+        # تنظيف الإعلانات المنتهية الصلاحية أولاً
+        cleanup_expired_announcements_logic(supabase)
+        
+        now = datetime.now().isoformat()
+
+        # جلب الإعلانات غير المنتهية فقط
+        anns_res = (
+            supabase.table("announcements")
+            .select("*")
+            .eq("department_id", user["department_id"])
+            .or_(f"expires_at.is.null,expires_at.gt.{now}")
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return format_response(data=anns_res.data, message="تم جلب الإعلانات")
+    except Exception as e:
+        return format_response(message=str(e), success=False, status_code=500)
+
+
+@dept_bp.route("/announcements/<int:ann_id>", methods=["PUT"])
+@department_access_required
+def dept_update_announcement(user, ann_id):
+    """تحديث إعلان في قسم المستخدم (رئيس القسم أو المشرف)"""
+    try:
+        if user["role"] not in ["department_head", "supervisor"]:
+            return format_response(
+                message="هذه الوظيفة متاحة لرئيس القسم أو المشرف فقط",
+                success=False,
+                status_code=403,
+            )
+        supabase = current_app.supabase
+        ann_res = (
+            supabase.table("announcements")
+            .select("id")
+            .eq("id", ann_id)
+            .eq("department_id", user["department_id"])
+            .execute()
+        )
+        if not ann_res.data:
+            return format_response(
+                message="الإعلان غير موجود", success=False, status_code=404
+            )
+
+        data = request.get_json() or {}
+        update_data = {}
+        if "title" in data:
+            update_data["title"] = data["title"]
+        if "body" in data:
+            update_data["body"] = data["body"]
+        if "is_active" in data:
+            update_data["is_active"] = bool(data["is_active"])
+        if "expires_at" in data:
+            update_data["expires_at"] = data["expires_at"]
+
+        if update_data:
+            update_res = (
+                supabase.table("announcements")
+                .update(update_data)
+                .eq("id", ann_id)
+                .execute()
+            )
+            return format_response(data=update_res.data[0], message="تم تحديث الإعلان")
+        else:
+            return format_response(data=ann_res.data[0], message="لم يتم تحديث أي بيانات")
+    except Exception as e:
+        return format_response(message=str(e), success=False, status_code=500)
+
+
+@dept_bp.route("/announcements/<int:ann_id>", methods=["DELETE"])
+@department_access_required
+def dept_delete_announcement(user, ann_id):
+    """حذف إعلان في قسم المستخدم (رئيس القسم أو المشرف)"""
+    try:
+        if user["role"] not in ["department_head", "supervisor"]:
+            return format_response(
+                message="هذه الوظيفة متاحة لرئيس القسم أو المشرف فقط",
+                success=False,
+                status_code=403,
+            )
+        supabase = current_app.supabase
+        ann_res = (
+            supabase.table("announcements")
+            .select("id")
+            .eq("id", ann_id)
+            .eq("department_id", user["department_id"])
+            .execute()
+        )
+        if not ann_res.data:
+            return format_response(
+                message="الإعلان غير موجود", success=False, status_code=404
+            )
+
+        supabase.table("announcements").delete().eq("id", ann_id).execute()
+        return format_response(message="تم حذف الإعلان")
+    except Exception as e:
+        return format_response(message=str(e), success=False, status_code=500)
+
+
+@dept_bp.route("/available-rooms/<int:department_id>", methods=["GET"])
+@department_access_required
+def get_available_rooms_for_department(user, department_id):
+    """الحصول على القاعات الفارغة لقسم معين في وقت محدد مع التحقق من المدة"""
+    try:
+        supabase = current_app.supabase
+        
+        # الحصول على معاملات الوقت
+        day_of_week = request.args.get("day_of_week")
+        start_time = request.args.get("start_time")
+        end_time = request.args.get("end_time")
+        study_type = request.args.get("study_type", "morning")
+        date = request.args.get("date")  # التاريخ المطلوب للنقل
+        
+        if not all([day_of_week, start_time, end_time]):
+            return format_response(
+                message="يجب تحديد اليوم ووقت البداية ووقت النهاية",
+                success=False,
+                status_code=400
+            )
+        
+        # حساب مدة المحاضرة الأصلية بالدقائق
+        from datetime import datetime
+        try:
+            original_start = datetime.strptime(start_time, "%H:%M")
+            original_end = datetime.strptime(end_time, "%H:%M")
+            original_duration_minutes = int((original_end - original_start).total_seconds() / 60)
+        except ValueError:
+            return format_response(
+                message="صيغة الوقت غير صحيحة، يجب أن تكون HH:MM",
+                success=False,
+                status_code=400
+            )
+        
+        # جلب قاعات القسم المحدد
+        rooms_res = supabase.table("rooms").select("*").eq("department_id", department_id).eq("is_active", True).execute()
+        
+        if not rooms_res.data:
+            return format_response(
+                data=[],
+                message="لا توجد قاعات فعالة في هذا القسم"
+            )
+        
+        available_rooms = []
+        
+        for room in rooms_res.data:
+            # جلب جميع الجداول للقاعة في نفس اليوم ونوع الدراسة
+            schedules_res = supabase.table("schedules").select("*").eq("room_id", room["id"]).eq("day_of_week", day_of_week).eq("study_type", study_type).execute()
+            
+            # ترتيب الجداول حسب الوقت
+            room_schedules = sorted(schedules_res.data, key=lambda x: x["start_time"])
+            
+            # التحقق من التداخل مع الجداول العادية
+            has_conflict = False
+            conflict_details = None
+            
+            for schedule in room_schedules:
+                schedule_start = schedule["start_time"]
+                schedule_end = schedule["end_time"]
+                
+                # فحص التداخل الزمني
+                if (start_time < schedule_end and end_time > schedule_start):
+                    has_conflict = True
+                    conflict_details = {
+                        "type": "regular",
+                        "subject": schedule["subject_name"],
+                        "time": f"{schedule_start} - {schedule_end}",
+                        "stage": schedule["academic_stage"]
+                    }
+                    break
+            
+            # إذا لم يكن هناك تداخل مع الجداول العادية، فحص النقل المؤقت
+            if not has_conflict and date:
+                postponed_res = supabase.table("schedules").select("*").eq("postponed_to_room_id", room["id"]).eq("postponed_date", date).execute()
+                
+                for postponed in postponed_res.data:
+                    postponed_start = postponed["postponed_start_time"]
+                    postponed_end = postponed["postponed_end_time"]
+                    
+                    if postponed_start and postponed_end and (start_time < postponed_end and end_time > postponed_start):
+                        has_conflict = True
+                        conflict_details = {
+                            "type": "temporary",
+                            "subject": postponed["subject_name"],
+                            "time": f"{postponed_start} - {postponed_end}",
+                            "stage": postponed["academic_stage"],
+                            "original_room": postponed["room_id"]
+                        }
+                        break
+            
+            # إذا كانت القاعة متاحة، احسب مدة التوفر
+            availability_info = None
+            duration_warning = None
+            
+            if not has_conflict:
+                # البحث عن المحاضرة التالية لحساب مدة التوفر
+                next_schedule = None
+                previous_schedule = None
+                
+                for schedule in room_schedules:
+                    if schedule["start_time"] > end_time:
+                        if next_schedule is None or schedule["start_time"] < next_schedule["start_time"]:
+                            next_schedule = schedule
+                    elif schedule["end_time"] <= start_time:
+                        if previous_schedule is None or schedule["end_time"] > previous_schedule["end_time"]:
+                            previous_schedule = schedule
+                
+                # حساب بداية ونهاية الفترة المتاحة
+                available_from = previous_schedule["end_time"] if previous_schedule else "06:00"
+                available_until = next_schedule["start_time"] if next_schedule else "23:59"
+                
+                # حساب المدة الكاملة المتاحة
+                try:
+                    available_start_dt = datetime.strptime(available_from, "%H:%M")
+                    available_end_dt = datetime.strptime(available_until, "%H:%M")
+                    total_available_minutes = int((available_end_dt - available_start_dt).total_seconds() / 60)
+                    
+                    # حساب المدة المتاحة بعد انتهاء المحاضرة المطلوبة
+                    required_end_dt = datetime.strptime(end_time, "%H:%M")
+                    remaining_minutes = int((available_end_dt - required_end_dt).total_seconds() / 60)
+                    
+                    availability_info = {
+                        "total_minutes": total_available_minutes,
+                        "remaining_minutes": remaining_minutes,
+                        "available_from": available_from,
+                        "available_until": available_until,
+                        "next_subject": next_schedule["subject_name"] if next_schedule else None,
+                        "previous_subject": previous_schedule["subject_name"] if previous_schedule else None
+                    }
+                    
+                    # التحقق من كفاية المدة المتاحة للمحاضرة الأصلية
+                    required_start_dt = datetime.strptime(start_time, "%H:%M")
+                    available_duration_for_lecture = int((available_end_dt - required_start_dt).total_seconds() / 60)
+                    
+                    if available_duration_for_lecture < original_duration_minutes:
+                        duration_warning = {
+                            "type": "insufficient",
+                            "available_duration": available_duration_for_lecture,
+                            "required_duration": original_duration_minutes,
+                            "shortage": original_duration_minutes - available_duration_for_lecture
+                        }
+                    elif available_duration_for_lecture == original_duration_minutes:
+                        duration_warning = {
+                            "type": "exact",
+                            "message": "المدة متطابقة تماماً مع المحاضرة الأصلية"
+                        }
+                    elif available_duration_for_lecture > original_duration_minutes * 2:
+                        duration_warning = {
+                            "type": "excess",
+                            "message": "القاعة متاحة لمدة طويلة"
+                        }
+                        
+                except ValueError:
+                    availability_info = {"error": "خطأ في حساب الأوقات"}
+            
+            # إضافة معلومات القاعة فقط إذا كانت متاحة
+            if not has_conflict:
+                room_info = {
+                    "id": room["id"],
+                    "name": room["name"],
+                    "code": room["code"],
+                    "capacity": room.get("capacity"),
+                    "location": room.get("location"),
+                    "is_available": True,
+                    "availability_info": availability_info,
+                    "duration_warning": duration_warning,
+                    "original_duration_minutes": original_duration_minutes
+                }
+                available_rooms.append(room_info)
+        
+        # ترتيب القاعات حسب مناسبة المدة (الأقرب للمدة المطلوبة أولاً)
+        def sort_key(room):
+            if room["availability_info"] and "total_minutes" in room["availability_info"]:
+                available_duration = room["availability_info"]["total_minutes"]
+                # تفضيل القاعات التي مدتها المتاحة قريبة من مدة المحاضرة الأصلية
+                duration_diff = abs(available_duration - original_duration_minutes)
+                return duration_diff
+            return float('inf')
+        
+        available_rooms.sort(key=sort_key)
+        
+        return format_response(
+            data=available_rooms,
+            message=f"تم العثور على {len(available_rooms)} قاعة متاحة في القسم للوقت المحدد"
+        )
+        
+    except Exception as e:
+        current_app.logger.error(f"Error getting available rooms: {str(e)}")
+        return format_response(
+            message=f"حدث خطأ: {str(e)}",
+            success=False,
+            status_code=500
+        )
+
+
+@dept_bp.route("/rooms", methods=["POST"])
+@department_access_required
+def create_room(user):
+    """إنشاء قاعة جديدة"""
+    try:
+        supabase = current_app.supabase
+        data = request.get_json()
+        
+        if not data:
+            return format_response(
+                message="لم يتم توفير بيانات", success=False, status_code=400
+            )
+        
+        required_fields = ["name", "code"]
+        for field in required_fields:
+            if field not in data or not data[field]:
+                return format_response(
+                    message=f"الحقل المطلوب مفقود: {field}",
+                    success=False,
+                    status_code=400,
+                )
+        
+        # التحقق من عدم وجود القاعة
+        existing_room = supabase.table("rooms").select("*").eq("code", data["code"]).execute()
+        if existing_room.data:
+            return format_response(
+                message="رمز القاعة موجود بالفعل", success=False, status_code=400
+            )
+        
+        # تحديد القسم
+        department_id = data.get("department_id")
+        if not department_id:
+            if user["role"] == "department_head":
+                department_id = user["department_id"]
+            else:
+                return format_response(
+                    message="يجب تحديد القسم", success=False, status_code=400
+                )
+        
+        # التحقق من صلاحية القسم
+        if user["role"] == "department_head" and department_id != user["department_id"]:
+            return format_response(
+                message="لا يمكنك إنشاء قاعة في قسم آخر", success=False, status_code=403
+            )
+        
+        # إنشاء القاعة
+        room_data = {
+            'name': data['name'],
+            'code': data['code'],
+            'department_id': department_id,
+            'capacity': data.get('capacity'),
+            'description': data.get('description'),
+            'is_active': data.get('is_active', True),
+            'created_at': datetime.utcnow().isoformat(),
+        }
+        
+        room_res = supabase.table("rooms").insert(room_data).execute()
+        
+        if room_res.data:
+            return format_response(data=room_res.data[0], message="تم إنشاء القاعة بنجاح")
+        else:
+            return format_response(
+                message="فشل في إنشاء القاعة", success=False, status_code=500
+            )
+        
+    except Exception as e:
+        return format_response(
+            message=f"حدث خطأ: {str(e)}", success=False, status_code=500
         )

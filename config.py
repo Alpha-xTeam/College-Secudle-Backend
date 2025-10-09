@@ -16,6 +16,8 @@ class Config:
     # QR Code Configuration
     QR_CODE_FOLDER = 'static/qrcodes'
     FRONTEND_URL = 'https://www.it-college.zone.id'
+    # CORS origins: comma-separated list (development and production). Example: 'http://localhost:3033,https://hsabadi.pythonanywhere.com'
+    CORS_ORIGINS = os.environ.get('CORS_ORIGINS', 'http://localhost:3033,https://hsabadi.pythonanywhere.com')
     
     # File Upload Configuration
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
