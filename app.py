@@ -48,7 +48,36 @@ def create_app():
     
     # إنشاء المجلدات المطلوبة
     create_required_folders()
-    
+
+    # --- Early preflight handler (register BEFORE blueprints) ---
+    @app.before_request
+    def handle_preflight_early():
+        try:
+            if request.method == "OPTIONS":
+                # Log that we handled an early preflight so we can diagnose 500s
+                app.logger.debug("Handling early CORS preflight for %s", request.path)
+                response = jsonify()
+                origin = request.headers.get('Origin')
+                if origin and (('*' in allowed_origins) or origin in allowed_origins):
+                    response.headers.add("Access-Control-Allow-Origin", origin if '*' not in allowed_origins else '*')
+                else:
+                    if allowed_origins:
+                        response.headers.add("Access-Control-Allow-Origin", allowed_origins[0])
+                response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,apikey,Access-Control-Allow-Headers,Origin,Accept,X-Requested-With")
+                response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,PATCH,DELETE,OPTIONS")
+                response.headers.add('Access-Control-Allow-Credentials', 'true')
+                return response
+        except Exception as e:
+            # If anything goes wrong while handling preflight, log and return a safe preflight response
+            app.logger.exception("Exception while handling preflight: %s", e)
+            safe = jsonify()
+            if allowed_origins:
+                safe.headers.add("Access-Control-Allow-Origin", allowed_origins[0])
+            safe.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,apikey,Access-Control-Allow-Headers,Origin,Accept,X-Requested-With")
+            safe.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,PATCH,DELETE,OPTIONS")
+            safe.headers.add('Access-Control-Allow-Credentials', 'true')
+            return safe
+
     # Register blueprints
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(dean_bp, url_prefix='/api/dean')
@@ -60,23 +89,8 @@ def create_app():
     app.register_blueprint(doctor_bp, url_prefix='/api/doctors') # New blueprint registration
     app.register_blueprint(owner_bp, url_prefix='/api/owner')
     
-    # Global OPTIONS handler for preflight requests
-    @app.before_request
-    def handle_preflight():
-        if request.method == "OPTIONS":
-            response = jsonify()
-            origin = request.headers.get('Origin')
-            # If origin is allowed, echo it; otherwise fall back to configured first origin or allow none
-            if origin and (('*' in allowed_origins) or origin in allowed_origins):
-                response.headers.add("Access-Control-Allow-Origin", origin if '*' not in allowed_origins else '*')
-            else:
-                # If frontend origin configured, echo the first one to support credentials
-                if allowed_origins:
-                    response.headers.add("Access-Control-Allow-Origin", allowed_origins[0])
-            response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,apikey,Access-Control-Allow-Headers,Origin,Accept,X-Requested-With")
-            response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,PATCH,DELETE,OPTIONS")
-            response.headers.add('Access-Control-Allow-Credentials', 'true')
-            return response
+    # NOTE: early preflight handler was registered before blueprint registration to avoid
+    # running any blueprint-level before_request handlers that might raise during preflight.
 
     # Add CORS headers to all responses
     @app.after_request
@@ -119,7 +133,38 @@ def create_app():
     
     @app.errorhandler(500)
     def internal_error(error):
-        return jsonify({'error': 'Internal server error'}), 500
+        resp = jsonify({'error': 'Internal server error'})
+        # Make sure CORS headers are present on error responses so browsers can read them
+        origin = request.headers.get('Origin')
+        if origin and (('*' in allowed_origins) or origin in allowed_origins):
+            resp.headers['Access-Control-Allow-Origin'] = origin if '*' not in allowed_origins else '*'
+        else:
+            if allowed_origins:
+                resp.headers.setdefault('Access-Control-Allow-Origin', allowed_origins[0])
+            else:
+                resp.headers.setdefault('Access-Control-Allow-Origin', '*')
+        resp.headers.setdefault('Access-Control-Allow-Headers', "Content-Type,Authorization,apikey,Access-Control-Allow-Headers,Origin,Accept,X-Requested-With")
+        resp.headers.setdefault('Access-Control-Allow-Methods', "GET,PUT,POST,PATCH,DELETE,OPTIONS")
+        resp.headers.setdefault('Access-Control-Allow-Credentials', "true")
+        return resp, 500
+
+    # Catch-all exception handler: ensure CORS headers and log exception
+    @app.errorhandler(Exception)
+    def handle_exception(e):
+        app.logger.exception('Unhandled exception during request: %s', e)
+        resp = jsonify({'error': 'Internal server error'})
+        origin = request.headers.get('Origin')
+        if origin and (('*' in allowed_origins) or origin in allowed_origins):
+            resp.headers['Access-Control-Allow-Origin'] = origin if '*' not in allowed_origins else '*'
+        else:
+            if allowed_origins:
+                resp.headers.setdefault('Access-Control-Allow-Origin', allowed_origins[0])
+            else:
+                resp.headers.setdefault('Access-Control-Allow-Origin', '*')
+        resp.headers.setdefault('Access-Control-Allow-Headers', "Content-Type,Authorization,apikey,Access-Control-Allow-Headers,Origin,Accept,X-Requested-With")
+        resp.headers.setdefault('Access-Control-Allow-Methods', "GET,PUT,POST,PATCH,DELETE,OPTIONS")
+        resp.headers.setdefault('Access-Control-Allow-Credentials', "true")
+        return resp, 500
     
     # JWT error handlers
     @jwt.expired_token_loader

@@ -15,11 +15,6 @@ from utils.qr_generator import generate_room_qr, delete_room_qr
 import os
 import io
 
-try:
-    from fpdf import FPDF
-except ImportError:
-    FPDF = None
-
 room_bp = Blueprint("rooms", __name__)
 
 
@@ -52,9 +47,14 @@ def get_rooms():
 
         rooms_res = query.execute()
         
-        # Fetch departments to map department_id to department name
-        departments_res = supabase.table("departments").select("id, name").execute()
-        departments_dict = {dept["id"]: dept["name"] for dept in departments_res.data}
+        # Fetch departments to map department_id to department name (defensive: table may not exist)
+        departments_dict = {}
+        try:
+            departments_res = supabase.table("departments").select("id, name").execute()
+            if departments_res and getattr(departments_res, 'data', None):
+                departments_dict = {dept["id"]: dept["name"] for dept in departments_res.data}
+        except Exception:
+            departments_dict = {}
         
         # Add department name to each room
         for room in rooms_res.data:
@@ -113,12 +113,17 @@ def create_room():
                 message="رمز القاعة موجود مسبقاً", success=False, status_code=400
             )
 
+        # Determine department assignment:
+        # - department_head and supervisor default to their own department
+        # - dean and owner may create rooms for any department or leave it unspecified
+        department_id = None
         if user["role"] in ["department_head", "supervisor"]:
             department_id = user["department_id"]
         else:
             department_id = data.get("department_id")
 
-        if not department_id:
+        if not department_id and user["role"] not in ["dean", "owner"]:
+            # Only dean/owner may omit department_id
             return format_response(
                 message="معرف القسم مطلوب", success=False, status_code=400
             )
@@ -235,12 +240,15 @@ def get_room(room_id):
                 status_code=403,
             )
 
-        # Add department name to room
+        # Add department name to room (defensive)
         if room.get("department_id"):
-            department_res = supabase.table("departments").select("name").eq("id", room["department_id"]).execute()
-            if department_res.data:
-                room["department"] = {"name": department_res.data[0]["name"]}
-            else:
+            try:
+                department_res = supabase.table("departments").select("name").eq("id", room["department_id"]).execute()
+                if department_res and getattr(department_res, 'data', None):
+                    room["department"] = {"name": department_res.data[0]["name"]}
+                else:
+                    room["department"] = {"name": "Unknown"}
+            except Exception:
                 room["department"] = {"name": "Unknown"}
         else:
             room["department"] = {"name": "No Department"}
@@ -1909,13 +1917,19 @@ def postpone_schedule(room_id, schedule_id):
         original_dept_name = None
         new_dept_name = None
         if original_dept_id:
-            dept_res = supabase.table("departments").select("name").eq("id", original_dept_id).execute()
-            if dept_res.data:
-                original_dept_name = dept_res.data[0]['name']
+            try:
+                dept_res = supabase.table("departments").select("name").eq("id", original_dept_id).execute()
+                if dept_res and getattr(dept_res, 'data', None):
+                    original_dept_name = dept_res.data[0]['name']
+            except Exception:
+                original_dept_name = None
         if new_dept_id:
-            dept_res2 = supabase.table("departments").select("name").eq("id", new_dept_id).execute()
-            if dept_res2.data:
-                new_dept_name = dept_res2.data[0]['name']
+            try:
+                dept_res2 = supabase.table("departments").select("name").eq("id", new_dept_id).execute()
+                if dept_res2 and getattr(dept_res2, 'data', None):
+                    new_dept_name = dept_res2.data[0]['name']
+            except Exception:
+                new_dept_name = None
 
         day_name_arabic_map = {
             "sunday": "الأحد",
@@ -2334,17 +2348,28 @@ def upload_weekly_schedule(room_id):
                     errors.append(f"الصف {index + 2}: وقت البداية يجب أن يكون قبل وقت النهاية")
                     continue
 
-                # Check for conflicting schedules
+                # Determine lecture type, section/group for this row
+                lecture_type_row = str(row.get("lecture_type", "نظري")).strip() or "نظري"
+                db_lecture_type = "theoretical" if lecture_type_row == "نظري" else "practical"
+                if lecture_type_row == "نظري":
+                    section = int(row.get("section", 1)) if pd.notna(row.get("section")) else 1
+                    group = None
+                else:
+                    group = str(row.get("group", "A")).strip() if pd.notna(row.get("group")) else "A"
+                    section = None
+
+                # Check for conflicting schedules using the parsed start/end time strings
+                # (previous conditional builder removed) - build below using explicit fields
+                # Build a proper query using start_time_str and end_time_str
                 conflicting_schedule_res = (
                     supabase.table("schedules")
                     .select("*")
                     .eq("room_id", room_id)
-                    .eq("study_type", row["study_type"])
-                    .eq("day_of_week", row["day_of_week"])
+                    .eq("study_type", row["study_type"]) 
+                    .eq("day_of_week", row["day_of_week"]) 
                     .eq("is_active", True)
-                    .neq("id", schedule_id) # Exclude current schedule from conflict check
-                    .lt("start_time", data['end_time'])
-                    .gt("end_time", data['start_time'])
+                    .lt("start_time", end_time_str)
+                    .gt("end_time", start_time_str)
                     .execute()
                 )
 
@@ -2359,8 +2384,8 @@ def upload_weekly_schedule(room_id):
                     "study_type": row["study_type"].lower(),
                     "academic_stage": row["academic_stage"].lower(),
                     "day_of_week": row["day_of_week"],
-                    "start_time": str(row["start_time"]),
-                    "end_time": str(row["end_time"]),
+                    "start_time": start_time_str,
+                    "end_time": end_time_str,
                     "subject_name": row["subject_name"],
                     "instructor_name": instructor_name,  # Always save the name for display
                     "notes": str(row.get("notes")) if pd.notna(row.get("notes")) else "",
@@ -2626,6 +2651,22 @@ def upload_general_weekly_schedule():
                         errors.append(f"الصف {index + 2} (القاعة {room_code}): اسم القسم مفقود.")
                         continue
 
+                    # Determine lecture type and grouping for this row
+                    lecture_type_row = str(row.get("lecture_type", "نظري")).strip() or "نظري"
+                    db_lecture_type = "theoretical" if lecture_type_row == "نظري" else "practical"
+                    if lecture_type_row == "نظري":
+                        try:
+                            section = int(row.get("section", 1)) if pd.notna(row.get("section")) else 1
+                        except Exception:
+                            section = 1
+                        group = None
+                    else:
+                        group = str(row.get("group", "A")).strip() if pd.notna(row.get("group")) else "A"
+                        section = None
+
+                    start_time_str = str(row["start_time"])
+                    end_time_str = str(row["end_time"])
+
                     schedule_data = {
                         "room_id": room_id,
                         "study_type": row["study_type"].lower(),
@@ -2708,7 +2749,10 @@ def upload_general_weekly_schedule():
 def download_schedule_pdf(room_id):
     """تنزيل الجدول الأسبوعي لقاعة معينة كملف PDF"""
     try:
-        if FPDF is None:
+        # Import FPDF locally to avoid top-level import issues
+        try:
+            from fpdf import FPDF
+        except Exception:
             return format_response(
                 message="مكتبة PDF غير متوفرة. يرجى الاتصال بالمسؤول",
                 success=False,

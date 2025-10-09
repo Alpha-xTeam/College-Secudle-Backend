@@ -601,6 +601,11 @@ def get_available_rooms_for_department(user, department_id):
     """الحصول على القاعات الفارغة لقسم معين في وقت محدد مع التحقق من المدة"""
     try:
         supabase = current_app.supabase
+        # Allow dean and owner to query any department. Other roles must match their department.
+        if user["role"] not in ["dean", "owner"] and department_id != user.get("department_id"):
+            return format_response(
+                message="لا يمكنك الوصول إلى قاعات هذا القسم", success=False, status_code=403
+            )
         
         # الحصول على معاملات الوقت
         day_of_week = request.args.get("day_of_week")
@@ -821,15 +826,22 @@ def create_room(user):
         
         # تحديد القسم
         department_id = data.get("department_id")
+        # Allow department_head to default to their own department.
+        # Allow dean and owner to create rooms for any department (or leave department unspecified).
         if not department_id:
             if user["role"] == "department_head":
                 department_id = user["department_id"]
+            elif user["role"] in ["dean", "owner"]:
+                # dean/owner may create rooms without specifying a department (will be stored as None)
+                department_id = None
             else:
                 return format_response(
                     message="يجب تحديد القسم", success=False, status_code=400
                 )
         
-        # التحقق من صلاحية القسم
+        # التحقق من صلاحية القسم:
+        # - department_head يستطيع فقط إنشاء قاعات في قسمه
+        # - dean و owner يمكنهم إنشاء قاعات لأي قسم
         if user["role"] == "department_head" and department_id != user["department_id"]:
             return format_response(
                 message="لا يمكنك إنشاء قاعة في قسم آخر", success=False, status_code=403
@@ -1347,72 +1359,4 @@ def get_available_rooms_for_department(user, department_id):
         )
 
 
-@dept_bp.route("/rooms", methods=["POST"])
-@department_access_required
-def create_room(user):
-    """إنشاء قاعة جديدة"""
-    try:
-        supabase = current_app.supabase
-        data = request.get_json()
-        
-        if not data:
-            return format_response(
-                message="لم يتم توفير بيانات", success=False, status_code=400
-            )
-        
-        required_fields = ["name", "code"]
-        for field in required_fields:
-            if field not in data or not data[field]:
-                return format_response(
-                    message=f"الحقل المطلوب مفقود: {field}",
-                    success=False,
-                    status_code=400,
-                )
-        
-        # التحقق من عدم وجود القاعة
-        existing_room = supabase.table("rooms").select("*").eq("code", data["code"]).execute()
-        if existing_room.data:
-            return format_response(
-                message="رمز القاعة موجود بالفعل", success=False, status_code=400
-            )
-        
-        # تحديد القسم
-        department_id = data.get("department_id")
-        if not department_id:
-            if user["role"] == "department_head":
-                department_id = user["department_id"]
-            else:
-                return format_response(
-                    message="يجب تحديد القسم", success=False, status_code=400
-                )
-        
-        # التحقق من صلاحية القسم
-        if user["role"] == "department_head" and department_id != user["department_id"]:
-            return format_response(
-                message="لا يمكنك إنشاء قاعة في قسم آخر", success=False, status_code=403
-            )
-        
-        # إنشاء القاعة
-        room_data = {
-            'name': data['name'],
-            'code': data['code'],
-            'department_id': department_id,
-            'capacity': data.get('capacity'),
-            'description': data.get('description'),
-            'is_active': data.get('is_active', True),
-            'created_at': datetime.utcnow().isoformat(),
-        }
-        
-        room_res = supabase.table("rooms").insert(room_data).execute()
-        
-        if room_res.data:
-            return format_response(data=room_res.data[0], message="تم إنشاء القاعة بنجاح")
-        else:
-            return format_response(
-                message="فشل في إنشاء القاعة", success=False, status_code=500
-            )
-        
-    except Exception as e:
-        return format_response(
-            message=f"حدث خطأ: {str(e)}", success=False, status_code=500
-        )
+# ...existing code... (duplicate create_room removed)
