@@ -169,18 +169,20 @@ def create_user():
             # 500 caused by PostgREST schema cache mismatch like PGRST204.
             err_msg = str(e)
             current_app.logger.warning(f"users.insert failed, attempting profiles fallback: {err_msg}")
-            try:
-                profile_data = {
-                    'full_name': preferred_name,
-                    'email': data['email'],
-                    'role': data['role'],
-                    'created_at': datetime.utcnow().isoformat(),
-                }
-                profile_res = supabase.table('profiles').insert(profile_data).execute()
-                if profile_res and profile_res.data:
-                    return format_response(data=profile_res.data[0], message="تم إنشاء ملف تعريف المستخدم بنجاح")
-            except Exception as e2:
-                current_app.logger.exception(f"profiles.insert fallback also failed: {e2}")
+            current_app.logger.warning(f"Condition check: {'PGRST204' in err_msg} or {'Could not find' in err_msg}")
+            if "PGRST204" in err_msg or "Could not find" in err_msg:
+                try:
+                    profile_data = {
+                        'full_name': preferred_name,
+                        'email': data['email'],
+                        'role': data['role'],
+                        'created_at': datetime.utcnow().isoformat(),
+                    }
+                    profile_res = supabase.table('profiles').insert(profile_data).execute()
+                    if profile_res and profile_res.data:
+                        return format_response(data=profile_res.data[0], message="تم إنشاء ملف تعريف المستخدم بنجاح")
+                except Exception as e2:
+                    current_app.logger.exception(f"profiles.insert fallback also failed: {e2}")
             return format_response(
                 message=f"فشل في إنشاء المستخدم: {err_msg}", success=False, status_code=500
             )
