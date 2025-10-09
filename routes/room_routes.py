@@ -2751,7 +2751,14 @@ def download_schedule_pdf(room_id):
     try:
         # Import FPDF locally to avoid top-level import issues
         try:
-            from fpdf import FPDF
+            try:
+                from fpdf import FPDF
+            except Exception:
+                # fpdf (fpdf2) may not be installed in the environment used by static analysis
+                # Raise a clear runtime error so deployment logs show an actionable message
+                raise RuntimeError(
+                    "The 'fpdf' package is required for PDF export. Install it with: pip install fpdf2"
+                )
         except Exception:
             return format_response(
                 message="مكتبة PDF غير متوفرة. يرجى الاتصال بالمسؤول",
