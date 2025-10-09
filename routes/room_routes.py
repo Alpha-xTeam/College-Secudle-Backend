@@ -234,7 +234,7 @@ def get_room(room_id):
                     status_code=403,
                 )
         elif user["role"] not in ["dean", "owner"] and room["department_id"] != user["department_id"]:
-            return format_response(
+              return format_response(
                 message="لا يمكنك الوصول لهذه القاعة",
                 success=False,
                 status_code=403,
@@ -295,7 +295,7 @@ def update_room(room_id):
                     success=False,
                     status_code=403,
                 )
-        elif user["role"] != "dean" and room["department_id"] != user["department_id"]:
+        if user["role"] not in ["dean", "owner"] and room["department_id"] != user["department_id"]:
             return format_response(
                 message="لا يمكنك تعديل هذه القاعة",
                 success=False,
@@ -359,7 +359,7 @@ def delete_room(room_id):
                     success=False,
                     status_code=403,
                 )
-        elif user["role"] != "dean" and room["department_id"] != user["department_id"]:
+        elif user["role"] not in ["dean", "owner"] and room["department_id"] != user["department_id"]:
             return format_response(
                 message="لا يمكنك حذف هذه القاعة",
                 success=False,
@@ -971,7 +971,7 @@ def create_schedule_with_multiple_doctors(data, user, room_id):
             )
         room = room_res.data[0]
 
-        if user["role"] != "dean" and room["department_id"] != user["department_id"]:
+        if user["role"] not in ["dean", "owner"] and room["department_id"] != user["department_id"]:
             return format_response(
                 message="لا يمكنك إدارة جداول هذه القاعة",
                 success=False,
@@ -2227,7 +2227,7 @@ def upload_weekly_schedule(room_id):
             )
         room = room_res.data[0]
 
-        if user["role"] != "dean" and room["department_id"] != user["department_id"]:
+        if user["role"] not in ["dean", "owner"] and room["department_id"] != user["department_id"]:
             return format_response(
                 message="لا يمكنك إدارة جداول هذه القاعة",
                 success=False,
@@ -2795,7 +2795,7 @@ def download_schedule_pdf(room_id):
                     success=False,
                     status_code=403,
                 )
-        elif user["role"] != "dean" and room["department_id"] != user["department_id"]:
+        elif user["role"] not in ["dean", "owner"] and room["department_id"] != user["department_id"]:
             return format_response(
                 message="لا يمكنك الوصول لهذه القاعة",
                 success=False,
@@ -2947,7 +2947,7 @@ def delete_all_schedules(room_id):
         room = room_res.data[0]
 
         # Check user authorization
-        if user["role"] != "dean" and room["department_id"] != user["department_id"]:
+        if user["role"] not in ["dean", "owner"] and room["department_id"] != user["department_id"]:
             return format_response(
                 message="لا يمكنك حذف جداول هذه القاعة",
                 success=False,

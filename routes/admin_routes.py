@@ -18,7 +18,7 @@ def upload_students_excel():
         username = get_jwt_identity()
         user = get_user_by_username(username)
 
-        if not user or user["role"] != "dean":
+        if not user or user["role"] not in ["dean", "owner"]:
             return format_response(
                 message="ليس لديك صلاحية لهذا الإجراء",
                 success=False,
