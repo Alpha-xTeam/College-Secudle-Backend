@@ -113,7 +113,8 @@ def create_user():
                 message="لم يتم توفير بيانات", success=False, status_code=400
             )
         
-        required_fields = ["username", "email", "name", "role", "password"]
+        required_fields = ["username", "email", "role", "password"]
+        # Ensure required top-level fields are present
         for field in required_fields:
             if field not in data or not data[field]:
                 return format_response(
@@ -121,6 +122,13 @@ def create_user():
                     success=False,
                     status_code=400,
                 )
+        # Accept either legacy 'name' or newer 'full_name' from frontend
+        if not data.get('name') and not data.get('full_name'):
+            return format_response(
+                message="الحقل المطلوب مفقود: name أو full_name",
+                success=False,
+                status_code=400,
+            )
         
         # التحقق من عدم وجود المستخدم
         existing_user = supabase.table("users").select("*").eq("username", data["username"]).execute()
@@ -135,24 +143,49 @@ def create_user():
                 message="الإيميل موجود بالفعل", success=False, status_code=400
             )
         
-        # إنشاء المستخدم
+        # إنشاء بيانات المستخدم الأولية
+        preferred_name = data.get('name') or data.get('full_name')
         user_data = {
             'username': data['username'],
             'email': data['email'],
-            'name': data['name'],
+            'name': preferred_name,
             'role': data['role'],
             'department_id': data.get('department_id'),
             'is_active': data.get('is_active', True),
             'created_at': datetime.utcnow().isoformat(),
         }
-        
+
         # تشفير كلمة المرور
         from models import set_password
         user_data['password_hash'] = set_password(data['password'])
-        
-        user_res = supabase.table("users").insert(user_data).execute()
-        
-        if user_res.data:
+
+        # حاول الإدراج في جدول 'users' ثم قم بالرجوع إلى 'profiles' إذا تعذر الإدراج
+        try:
+            user_res = supabase.table("users").insert(user_data).execute()
+        except Exception as e:
+            # If the upstream DB doesn't have the legacy 'name' column on users
+            # (e.g. this project uses a public.profiles table instead), fall back
+            # to creating a profile record using 'full_name'. This prevents a
+            # 500 caused by PostgREST schema cache mismatch like PGRST204.
+            err_msg = str(e)
+            current_app.logger.warning(f"users.insert failed, attempting profiles fallback: {err_msg}")
+            try:
+                profile_data = {
+                    'full_name': preferred_name,
+                    'email': data['email'],
+                    'role': data['role'],
+                    'created_at': datetime.utcnow().isoformat(),
+                }
+                profile_res = supabase.table('profiles').insert(profile_data).execute()
+                if profile_res and profile_res.data:
+                    return format_response(data=profile_res.data[0], message="تم إنشاء ملف تعريف المستخدم بنجاح")
+            except Exception as e2:
+                current_app.logger.exception(f"profiles.insert fallback also failed: {e2}")
+            return format_response(
+                message=f"فشل في إنشاء المستخدم: {err_msg}", success=False, status_code=500
+            )
+
+        if user_res and user_res.data:
             return format_response(data=user_res.data[0], message="تم إنشاء المستخدم بنجاح")
         else:
             return format_response(
@@ -187,11 +220,15 @@ def update_user_route(user_id):
         
         # تحديث البيانات
         update_data = {}
-        allowed_fields = ["name", "email", "role", "department_id", "is_active"]
-        
+        # Prefer newer 'full_name' column; accept legacy 'name' key from clients
+        allowed_fields = ["full_name", "email", "role", "department_id", "is_active"]
+
         for field in allowed_fields:
             if field in data:
                 update_data[field] = data[field]
+        # Backwards compatibility: if client sent 'name', map it to 'full_name'
+        if 'name' in data and 'full_name' not in update_data:
+            update_data['full_name'] = data['name']
         
         if data.get("password"):
             from models import set_password
